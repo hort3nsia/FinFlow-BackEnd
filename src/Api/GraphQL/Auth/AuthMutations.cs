@@ -1,6 +1,7 @@
 using FinFlow.Application.Auth.Dtos;
 using FinFlow.Application.Auth.Interfaces;
 using FinFlow.Domain.Enums;
+using HotChocolate;
 
 namespace FinFlow.Api.GraphQL.Auth;
 
@@ -22,15 +23,12 @@ public class AuthMutations
 {
     private readonly IAuthService _authService;
 
-    public AuthMutations(IAuthService authService)
-    {
-        _authService = authService;
-    }
+    public AuthMutations(IAuthService authService) => _authService = authService;
 
     public async Task<AuthPayload> LoginAsync(LoginInput input, CancellationToken cancellationToken)
     {
         var result = await _authService.LoginAsync(new LoginRequest(input.Email, input.Password), cancellationToken);
-        return ToPayload(result);
+        return HandleResult(result);
     }
 
     public async Task<AuthPayload> RegisterAsync(RegisterInput input, CancellationToken cancellationToken)
@@ -38,14 +36,22 @@ public class AuthMutations
         var result = await _authService.RegisterAsync(
             new RegisterRequest(input.Email, input.Password, input.Name, input.TenantCode, input.DepartmentName),
             cancellationToken);
-        return ToPayload(result);
+        return HandleResult(result);
     }
 
     public async Task<AuthPayload> RefreshTokenAsync(RefreshTokenInput input, CancellationToken cancellationToken)
     {
         var result = await _authService.RefreshTokenAsync(
             new RefreshTokenRequest(input.AccessToken, input.RefreshToken), cancellationToken);
-        return ToPayload(result);
+        return HandleResult(result);
+    }
+
+    private static AuthPayload HandleResult(FinFlow.Domain.Abstractions.Result<AuthResponse> result)
+    {
+        if (result.IsFailure)
+            throw new GraphQLException(new HotChocolate.Error(result.Error.Description, result.Error.Code));
+
+        return ToPayload(result.Value);
     }
 
     private static AuthPayload ToPayload(AuthResponse response) =>

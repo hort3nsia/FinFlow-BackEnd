@@ -1,43 +1,27 @@
-using FinFlow.Domain.Common;
-using FinFlow.Domain.Entities;
-using FinFlow.Domain.Interfaces;
+using FinFlow.Domain.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
-namespace FinFlow.Infrastructure.Data;
+namespace FinFlow.Infrastructure;
 
-public class ApplicationDbContext : DbContext, IApplicationDbContext
+public class ApplicationDbContext : DbContext, IUnitOfWork
 {
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-        : base(options)
-    {
-    }
-
-    public IQueryable<Tenant> Tenants => Set<Tenant>();
-    public IQueryable<Department> Departments => Set<Department>();
-    public IQueryable<Account> Accounts => Set<Account>();
-
-    public async Task AddEntityAsync<T>(T entity, CancellationToken cancellationToken = default) where T : class
-    {
-        await Set<T>().AddAsync(entity, cancellationToken);
-    }
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var entry in ChangeTracker.Entries<BaseEntity>())
+        foreach (var entry in ChangeTracker.Entries())
         {
-            switch (entry.State)
+            if (entry.State == EntityState.Added && entry.Entity is Entity entity)
             {
-                case EntityState.Added:
-                    entry.Entity.Id = entry.Entity.Id == Guid.Empty ? Guid.NewGuid() : entry.Entity.Id;
-                    entry.Entity.CreatedAt = DateTime.UtcNow;
-                    break;
-                case EntityState.Modified:
-                    entry.Entity.LastModifiedAt = DateTime.UtcNow;
-                    break;
-                case EntityState.Deleted:
-                    entry.Entity.IsDeleted = true;
-                    entry.State = EntityState.Modified;
-                    break;
+                if (entity.Id == Guid.Empty)
+                    entry.Property("Id").CurrentValue = Guid.NewGuid();
+            }
+
+            if (entry.State == EntityState.Deleted && entry.Entity is Entity)
+            {
+                entry.State = EntityState.Modified;
+                if (entry.Metadata.FindProperty("IsActive") != null)
+                    entry.Property("IsActive").CurrentValue = false;
             }
         }
 

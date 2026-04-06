@@ -1,9 +1,8 @@
-using FinFlow.Application.Auth.Interfaces;
-using FinFlow.Domain.Interfaces;
-using FinFlow.Domain.Settings;
-using FinFlow.Infrastructure.Auth;
-using FinFlow.Infrastructure.Data;
-using FinFlow.Infrastructure.Data.Repositories;
+using FinFlow.Domain.Abstractions;
+using FinFlow.Domain.Accounts;
+using FinFlow.Domain.Departments;
+using FinFlow.Domain.Tenants;
+using FinFlow.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,18 +13,22 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
+        services.Configure<Domain.Settings.JwtSettings>(configuration.GetSection("JwtSettings"));
 
-        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        var connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new ArgumentNullException(nameof(configuration));
 
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString, b => b.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
 
-        services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
-        services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<ApplicationDbContext>());
 
-        services.AddSingleton<JwtTokenService>();
-        services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<ITenantRepository, TenantRepository>();
+        services.AddScoped<IDepartmentRepository, DepartmentRepository>();
+        services.AddScoped<IAccountRepository, AccountRepository>();
+
+        services.AddSingleton<Auth.JwtTokenService>();
+        services.AddScoped<FinFlow.Application.Auth.Interfaces.IAuthService, Auth.AuthService>();
 
         return services;
     }
