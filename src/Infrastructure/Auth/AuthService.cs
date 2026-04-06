@@ -1,100 +1,101 @@
 using FinFlow.Application.Auth.Dtos;
 using FinFlow.Application.Auth.Interfaces;
+using FinFlow.Domain.Abstractions;
 using FinFlow.Domain.Entities;
 using FinFlow.Domain.Enums;
-using FinFlow.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
+using FinFlow.Domain.Accounts;
+using FinFlow.Domain.Tenants;
+using FinFlow.Domain.Departments;
 
 namespace FinFlow.Infrastructure.Auth;
 
 public class AuthService : IAuthService
 {
-    private readonly ApplicationDbContext _context;
+    private readonly IAccountRepository _accountRepo;
+    private readonly ITenantRepository _tenantRepo;
+    private readonly IDepartmentRepository _departmentRepo;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly JwtTokenService _tokenService;
 
-    public AuthService(ApplicationDbContext context, JwtTokenService tokenService)
+    public AuthService(
+        IAccountRepository accountRepo,
+        ITenantRepository tenantRepo,
+        IDepartmentRepository departmentRepo,
+        IUnitOfWork unitOfWork,
+        JwtTokenService tokenService)
     {
-        _context = context;
+        _accountRepo = accountRepo;
+        _tenantRepo = tenantRepo;
+        _departmentRepo = departmentRepo;
+        _unitOfWork = unitOfWork;
         _tokenService = tokenService;
     }
 
-    public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
-        var account = await _context.Accounts
-            .Include(a => a.Tenant)
-            .Include(a => a.Department)
-            .FirstOrDefaultAsync(a => a.Email == request.Email && !a.IsDeleted, cancellationToken);
+        var account = await _accountRepo.GetLoginInfoByEmailAsync(request.Email, cancellationToken);
 
         if (account == null || !BCrypt.Net.BCrypt.Verify(request.Password, account.PasswordHash))
-            throw new UnauthorizedAccessException("Invalid email or password");
+            return Result.Failure<AuthResponse>(AccountErrors.InvalidCurrentPassword);
+
+        if (!account.IsActive)
+            return Result.Failure<AuthResponse>(AccountErrors.AlreadyDeactivated);
 
         var accessToken = _tokenService.GenerateAccessToken(
             account.Id, account.Email, account.Role.ToString(), account.IdTenant, account.IdDepartment);
         var refreshToken = _tokenService.GenerateRefreshToken();
 
-        return new AuthResponse(
-            accessToken, refreshToken, account.Id, account.Email, account.Role, account.IdTenant, account.IdDepartment);
+        return Result.Success(new AuthResponse(
+            accessToken, refreshToken, account.Id, account.Email, account.Role, account.IdTenant, account.IdDepartment));
     }
 
-    public async Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<AuthResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
-        var existingAccount = await _context.Accounts
-            .AnyAsync(a => a.Email == request.Email && !a.IsDeleted, cancellationToken);
-
+        var existingAccount = await _accountRepo.ExistsByEmailAsync(request.Email, cancellationToken);
         if (existingAccount)
-            throw new InvalidOperationException("Email already exists");
+            return Result.Failure<AuthResponse>(AccountErrors.EmailAlreadyExists);
 
-        var existingTenant = await _context.Tenants
-            .AnyAsync(t => t.TenantCode == request.TenantCode && !t.IsDeleted, cancellationToken);
-
+        var existingTenant = await _tenantRepo.ExistsByCodeAsync(request.TenantCode, cancellationToken);
         if (existingTenant)
-            throw new InvalidOperationException("Tenant code already exists");
+            return Result.Failure<AuthResponse>(TenantErrors.CodeAlreadyExists);
 
-        var tenant = new Tenant
-        {
-            Name = request.Name,
-            TenantCode = request.TenantCode,
-            TenancyModel = TenancyModel.Shared,
-            Currency = "VND"
-        };
+        var tenantResult = Tenant.Create(request.Name, request.TenantCode, TenancyModel.Shared, "VND");
+        if (tenantResult.IsFailure)
+            return Result.Failure<AuthResponse>(tenantResult.Error);
 
-        await _context.AddEntityAsync(tenant, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        var tenant = tenantResult.Value;
 
-        var department = new Department
-        {
-            Name = request.DepartmentName,
-            IdTenant = tenant.Id
-        };
+        var departmentResult = Department.Create(request.DepartmentName, tenant.Id);
+        if (departmentResult.IsFailure)
+            return Result.Failure<AuthResponse>(departmentResult.Error);
 
-        await _context.AddEntityAsync(department, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        var department = departmentResult.Value;
 
-        var account = new Account
-        {
-            Email = request.Email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Role = RoleType.TenantAdmin,
-            IdTenant = tenant.Id,
-            IdDepartment = department.Id
-        };
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+        var accountResult = Account.Create(request.Email, passwordHash, RoleType.TenantAdmin, tenant.Id, department.Id);
+        if (accountResult.IsFailure)
+            return Result.Failure<AuthResponse>(accountResult.Error);
 
-        await _context.AddEntityAsync(account, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        var account = accountResult.Value;
+
+        _tenantRepo.Add(tenant);
+        _departmentRepo.Add(department);
+        _accountRepo.Add(account);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var accessToken = _tokenService.GenerateAccessToken(
             account.Id, account.Email, account.Role.ToString(), account.IdTenant, account.IdDepartment);
         var refreshToken = _tokenService.GenerateRefreshToken();
 
-        return new AuthResponse(
-            accessToken, refreshToken, account.Id, account.Email, account.Role, account.IdTenant, account.IdDepartment);
+        return Result.Success(new AuthResponse(
+            accessToken, refreshToken, account.Id, account.Email, account.Role, account.IdTenant, account.IdDepartment));
     }
 
-    public Task<AuthResponse> RefreshTokenAsync(RefreshTokenRequest request, CancellationToken cancellationToken = default)
+    public Task<Result<AuthResponse>> RefreshTokenAsync(RefreshTokenRequest request, CancellationToken cancellationToken = default)
     {
         var principal = _tokenService.ValidateToken(request.AccessToken);
         if (principal == null)
-            throw new UnauthorizedAccessException("Invalid token");
+            return Task.FromResult(Result.Failure<AuthResponse>(AccountErrors.InvalidCurrentPassword));
 
         var id = Guid.Parse(principal.FindFirst("sub")?.Value ?? Guid.Empty.ToString());
         var email = principal.FindFirst("email")?.Value ?? string.Empty;
@@ -105,7 +106,7 @@ public class AuthService : IAuthService
         var newAccessToken = _tokenService.GenerateAccessToken(id, email, role, idTenant, idDepartment);
         var newRefreshToken = _tokenService.GenerateRefreshToken();
 
-        return Task.FromResult(new AuthResponse(
-            newAccessToken, newRefreshToken, id, email, Enum.Parse<RoleType>(role), idTenant, idDepartment));
+        return Task.FromResult(Result.Success(new AuthResponse(
+            newAccessToken, newRefreshToken, id, email, Enum.Parse<RoleType>(role), idTenant, idDepartment)));
     }
 }

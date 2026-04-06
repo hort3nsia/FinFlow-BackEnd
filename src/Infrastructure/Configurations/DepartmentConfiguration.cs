@@ -4,39 +4,27 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace FinFlow.Infrastructure.Configurations;
 
-public class DepartmentConfiguration : IEntityTypeConfiguration<Department>
+internal sealed class DepartmentConfiguration : IEntityTypeConfiguration<Department>
 {
     public void Configure(EntityTypeBuilder<Department> builder)
     {
-        builder.ToTable("DEPARTMENT");
+        builder.ToTable("department");
 
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
 
-        builder.Property(x => x.IdTenant)
-            .HasColumnName("ID_TENANT")
-            .IsRequired();
+        builder.Property(x => x.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
+        builder.Property(x => x.IdTenant).HasColumnName("id_tenant").IsRequired();
+        builder.Property(x => x.ParentId).HasColumnName("parent_id");
+        builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+        builder.Property(x => x.IsActive).HasColumnName("is_active").HasDefaultValue(true).IsRequired();
 
-        builder.Property(x => x.ParentId)
-            .HasColumnName("PARENT_ID");
+        builder.HasQueryFilter(x => x.IsActive);
 
-        builder.Property(x => x.Name)
-            .HasColumnName("NAME")
-            .HasMaxLength(100)
-            .IsRequired();
+        builder.HasOne<Tenant>().WithMany().HasForeignKey(x => x.IdTenant).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Department>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasOne(x => x.Tenant)
-            .WithMany(x => x.Departments)
-            .HasForeignKey(x => x.IdTenant)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasOne(x => x.Parent)
-            .WithMany(x => x.Children)
-            .HasForeignKey(x => x.ParentId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasMany(x => x.Accounts)
-            .WithOne(x => x.Department)
-            .HasForeignKey(x => x.IdDepartment)
-            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.IdTenant);
+        builder.HasIndex(x => x.ParentId);
     }
 }
