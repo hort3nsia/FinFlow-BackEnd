@@ -57,10 +57,15 @@ public class AuthMutations
     public async Task<AuthPayload> RegisterAsync(
         RegisterInput input,
         [Service] IAuthService authService,
+        [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
+        var clientIp = httpContextAccessor.HttpContext?.GetClientIpAddress();
+        if (clientIp == "unknown") clientIp = null;
+
         var result = await authService.RegisterAsync(
             new RegisterRequest(input.Email, input.Password, input.Name, input.TenantCode, input.DepartmentName),
+            clientIp,
             cancellationToken);
         return HandleResult(result);
     }
