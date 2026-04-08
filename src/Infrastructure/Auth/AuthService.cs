@@ -9,6 +9,7 @@ using FinFlow.Domain.TenantMemberships;
 using FinFlow.Domain.Departments;
 using FinFlow.Domain.Invitations;
 using FinFlow.Domain.RefreshTokens;
+using System.Text.RegularExpressions;
 
 namespace FinFlow.Infrastructure.Auth;
 
@@ -23,6 +24,9 @@ public class AuthService : IAuthService
     private readonly IUnitOfWork _unitOfWork;
     private readonly JwtTokenService _tokenService;
     private readonly ILoginRateLimiter _rateLimiter;
+    private static readonly Regex _strongPasswordRegex = new(
+        @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$",
+        RegexOptions.Compiled);
 
     public AuthService(
         IAccountRepository accountRepo,
@@ -48,6 +52,9 @@ public class AuthService : IAuthService
 
     private AuthResponse CreateAuthResponse(AccountLoginInfo account, TenantMembershipSummary membership, string accessToken, string refreshToken) =>
         new(accessToken, refreshToken, account.Id, membership.Id, account.Email, membership.Role, membership.IdTenant, account.IdDepartment);
+
+    private static bool IsStrongPassword(string password) =>
+        !string.IsNullOrWhiteSpace(password) && _strongPasswordRegex.IsMatch(password);
 
     public async Task<Result<AuthResponse>> LoginAsync(LoginRequest request, string? clientIp, CancellationToken cancellationToken = default)
     {
@@ -98,45 +105,75 @@ public class AuthService : IAuthService
         return Result.Success(CreateAuthResponse(account, membership, accessToken, refreshTokenStr));
     }
 
-    public async Task<Result<AuthResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<AuthResponse>> RegisterAsync(RegisterRequest request, string? clientIp, CancellationToken cancellationToken = default)
     {
+        if (await _rateLimiter.IsBlockedAsync(clientIp, request.Email))
+            return Result.Failure<AuthResponse>(AccountErrors.TooManyRequests);
+
         var existingAccount = await _accountRepo.ExistsByEmailIgnoringTenantAsync(request.Email, cancellationToken);
         if (existingAccount)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(AccountErrors.EmailAlreadyExists);
+        }
 
         var existingTenant = await _tenantRepo.ExistsByCodeAsync(request.TenantCode, cancellationToken);
         if (existingTenant)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(TenantErrors.CodeAlreadyExists);
+        }
+
+        if (!IsStrongPassword(request.Password))
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
+            return Result.Failure<AuthResponse>(AccountErrors.PasswordTooWeak);
+        }
 
         var tenantResult = Tenant.Create(request.Name, request.TenantCode, TenancyModel.Shared, "VND");
         if (tenantResult.IsFailure)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(tenantResult.Error);
+        }
 
         var tenant = tenantResult.Value;
 
         var departmentResult = Department.Create(request.DepartmentName, tenant.Id);
         if (departmentResult.IsFailure)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(departmentResult.Error);
+        }
 
         var department = departmentResult.Value;
 
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
         var accountResult = Account.Create(request.Email, passwordHash, RoleType.TenantAdmin, tenant.Id, department.Id);
         if (accountResult.IsFailure)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(accountResult.Error);
+        }
 
         var account = accountResult.Value;
 
         var membershipResult = TenantMembership.Create(account.Id, tenant.Id, RoleType.TenantAdmin);
         if (membershipResult.IsFailure)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(membershipResult.Error);
+        }
 
         var membership = membershipResult.Value;
 
         var refreshTokenStr = _tokenService.GenerateRefreshToken();
         var refreshTokenResult = RefreshToken.Create(refreshTokenStr, account.Id, membership.Id, _tokenService.RefreshTokenExpirationDays);
         if (refreshTokenResult.IsFailure)
+        {
+            await _rateLimiter.RecordFailureAsync(clientIp, request.Email);
             return Result.Failure<AuthResponse>(refreshTokenResult.Error);
+        }
 
         var refreshToken = refreshTokenResult.Value;
 
@@ -146,6 +183,7 @@ public class AuthService : IAuthService
         _membershipRepo.Add(membership);
         _refreshTokenRepo.Add(refreshToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _rateLimiter.ResetAccountAsync(request.Email);
 
         var accessToken = _tokenService.GenerateAccessToken(
             account.Id, account.Email, membership.Role.ToString(), membership.IdTenant, account.IdDepartment, membership.Id);
@@ -328,6 +366,9 @@ public class AuthService : IAuthService
         if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
             return Result.Failure(AccountErrors.PasswordTooShort);
 
+        if (!IsStrongPassword(request.NewPassword))
+            return Result.Failure(AccountErrors.PasswordTooWeak);
+
         var newPasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
 
         var account = await _accountRepo.GetByIdForUpdateAsync(accountInfo.Id, cancellationToken);
@@ -338,6 +379,7 @@ public class AuthService : IAuthService
         if (changeResult.IsFailure)
             return changeResult;
 
+        await _refreshTokenRepo.RevokeAllForAccountAsync(account.Id, "Password changed", cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
