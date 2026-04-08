@@ -10,6 +10,7 @@ public static class AccountErrors
     public static readonly Error EmailAlreadyExists = new("Account.EmailExists", "An account with this email already exists");
     public static readonly Error PasswordRequired = new("Account.PasswordRequired", "Password is required");
     public static readonly Error PasswordTooShort = new("Account.PasswordTooShort", "Password must be at least 8 characters");
+    public static readonly Error PasswordTooWeak = new("Account.PasswordTooWeak", "Password must contain uppercase, lowercase, number, and special character");
     public static readonly Error InvalidCurrentPassword = new("Account.InvalidPassword", "Current password is incorrect");
     public static readonly Error SameRole = new("Account.SameRole", "The account already has this role");
     public static readonly Error SameDepartment = new("Account.SameDepartment", "The account is already in this department");

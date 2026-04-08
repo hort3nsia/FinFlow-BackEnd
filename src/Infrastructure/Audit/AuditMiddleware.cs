@@ -136,6 +136,16 @@ public class AuditMiddleware
             action = "REFRESH_TOKEN";
             entityType = "Account";
         }
+        else if (operationName.Equals("switchWorkspace", StringComparison.OrdinalIgnoreCase))
+        {
+            action = "SWITCH_WORKSPACE";
+            entityType = "TenantMembership";
+        }
+        else if (operationName.Equals("inviteMember", StringComparison.OrdinalIgnoreCase))
+        {
+            action = "INVITE_MEMBER";
+            entityType = "Invitation";
+        }
 
         if (action == null) return null;
 
