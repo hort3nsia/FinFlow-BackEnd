@@ -1,5 +1,8 @@
 using FinFlow.Application.Auth.Dtos;
 using FinFlow.Domain.Abstractions;
+using FinFlow.Application.Auth.Responses;
+using FinFlow.Application.Membership.Responses;
+using FinFlow.Application.Tenant.Responses;
 
 namespace FinFlow.Application.Auth.Interfaces;
 

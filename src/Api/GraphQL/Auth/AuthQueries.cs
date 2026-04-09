@@ -1,4 +1,5 @@
 using FinFlow.Application.Auth.Interfaces;
+using FinFlow.Application.Tenant.Responses;
 using HotChocolate.Authorization;
 using HotChocolate.Types;
 
