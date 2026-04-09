@@ -1,4 +1,5 @@
 using FinFlow.Application.Behaviors;
+using FinFlow.Application.Tenant.Support;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
@@ -15,6 +16,7 @@ public static class DependencyInjection
             cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
             cfg.AddBehavior(typeof(MediatR.IPipelineBehavior<,>), typeof(Behaviors.ValidationBehavior<,>));
         });
+        services.AddScoped<TenantCreationActorAuthorizationService>();
 
         return services;
     }

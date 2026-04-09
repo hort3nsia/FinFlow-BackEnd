@@ -3,10 +3,16 @@ using FinFlow.Application.Auth.Commands.Login;
 using FinFlow.Application.Auth.Commands.Logout;
 using FinFlow.Application.Auth.Commands.RefreshToken;
 using FinFlow.Application.Auth.Commands.Register;
+using FinFlow.Application;
 using FinFlow.Application.Common.Abstractions;
 using FinFlow.Application.Membership.Commands.AcceptInvite;
 using FinFlow.Application.Membership.Commands.InviteMember;
 using FinFlow.Application.Membership.Commands.SwitchWorkspace;
+using FinFlow.Application.Tenant.Commands.ApproveTenant;
+using FinFlow.Application.Tenant.Commands.CreateIsolatedTenant;
+using FinFlow.Application.Tenant.Commands.CreateSharedTenant;
+using FinFlow.Application.Tenant.Commands.RejectTenant;
+using FinFlow.Application.Tenant.Queries.GetPendingTenantRequests;
 using FinFlow.Domain.Abstractions;
 using FinFlow.Domain.Accounts;
 using FinFlow.Domain.Departments;
@@ -54,7 +60,7 @@ internal sealed class AuthFlowTestFixture
         var passwordHasher = new BcryptPasswordHasher();
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(FinFlow.Application.DependencyInjection).Assembly));
+        services.AddApplication();
 
         services.AddScoped<IAccountRepository>(_ => new AccountRepository(dbContext));
         services.AddScoped<ITenantRepository>(_ => new TenantRepository(dbContext));
@@ -71,30 +77,16 @@ internal sealed class AuthFlowTestFixture
         var serviceProvider = services.BuildServiceProvider();
         var mediator = serviceProvider.GetRequiredService<IMediator>();
 
-        var authService = new AuthService(
-            new AccountRepository(dbContext),
-            new TenantRepository(dbContext),
-            new TenantApprovalRequestRepository(dbContext),
-            new TenantMembershipRepository(dbContext),
-            new DepartmentRepository(dbContext),
-            new InvitationRepository(dbContext),
-            new RefreshTokenRepository(dbContext),
-            dbContext,
-            tokenService,
-            rateLimiter,
-            currentTenant,
-            mediator);
-
-        return new TestScope(dbContext, currentTenant, authService, rateLimiter, tokenService, passwordHasher, serviceProvider);
+        return new TestScope(dbContext, currentTenant, mediator, rateLimiter, tokenService, passwordHasher, serviceProvider);
     }
 
     internal sealed class TestScope : IDisposable
     {
-        public TestScope(ApplicationDbContext dbContext, CurrentTenant currentTenant, AuthService authService, TestLoginRateLimiter rateLimiter, ITokenService tokenService, IPasswordHasher passwordHasher, ServiceProvider serviceProvider)
+        public TestScope(ApplicationDbContext dbContext, CurrentTenant currentTenant, IMediator mediator, TestLoginRateLimiter rateLimiter, ITokenService tokenService, IPasswordHasher passwordHasher, ServiceProvider serviceProvider)
         {
             DbContext = dbContext;
             CurrentTenant = currentTenant;
-            AuthService = authService;
+            Mediator = mediator;
             RateLimiter = rateLimiter;
             TokenService = tokenService;
             PasswordHasher = passwordHasher;
@@ -103,7 +95,7 @@ internal sealed class AuthFlowTestFixture
 
         public ApplicationDbContext DbContext { get; }
         public CurrentTenant CurrentTenant { get; }
-        public AuthService AuthService { get; }
+        public IMediator Mediator { get; }
         public TestLoginRateLimiter RateLimiter { get; }
         public ITokenService TokenService { get; }
         public IPasswordHasher PasswordHasher { get; }
@@ -215,6 +207,11 @@ internal sealed class AuthFlowTestFixture
         public SwitchWorkspaceCommandHandler CreateSwitchWorkspaceHandler() => ActivatorUtilities.CreateInstance<SwitchWorkspaceCommandHandler>(ServiceProvider);
         public InviteMemberCommandHandler CreateInviteMemberHandler() => ActivatorUtilities.CreateInstance<InviteMemberCommandHandler>(ServiceProvider);
         public AcceptInviteCommandHandler CreateAcceptInviteHandler() => ActivatorUtilities.CreateInstance<AcceptInviteCommandHandler>(ServiceProvider);
+        public CreateSharedTenantCommandHandler CreateSharedTenantHandler() => ActivatorUtilities.CreateInstance<CreateSharedTenantCommandHandler>(ServiceProvider);
+        public CreateIsolatedTenantCommandHandler CreateIsolatedTenantHandler() => ActivatorUtilities.CreateInstance<CreateIsolatedTenantCommandHandler>(ServiceProvider);
+        public ApproveTenantCommandHandler CreateApproveTenantHandler() => ActivatorUtilities.CreateInstance<ApproveTenantCommandHandler>(ServiceProvider);
+        public RejectTenantCommandHandler CreateRejectTenantHandler() => ActivatorUtilities.CreateInstance<RejectTenantCommandHandler>(ServiceProvider);
+        public GetPendingTenantRequestsQueryHandler CreateGetPendingTenantRequestsHandler() => ActivatorUtilities.CreateInstance<GetPendingTenantRequestsQueryHandler>(ServiceProvider);
 
         public void Dispose()
         {

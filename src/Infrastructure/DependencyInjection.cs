@@ -50,7 +50,6 @@ public static class DependencyInjection
         services.AddSingleton<ITokenService, Auth.JwtTokenService>();
         services.AddSingleton<Auth.JwtTokenService>(sp => (Auth.JwtTokenService)sp.GetRequiredService<ITokenService>());
         services.AddSingleton<IPasswordHasher, Auth.BcryptPasswordHasher>();
-        services.AddScoped<FinFlow.Application.Auth.Interfaces.IAuthService, Auth.AuthService>();
 
         return services;
     }

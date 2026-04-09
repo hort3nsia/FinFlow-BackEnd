@@ -1,5 +1,5 @@
 using FinFlow.Application.Common;
-using FinFlow.Application.Tenant.Responses;
+using FinFlow.Application.Tenant.DTOs.Responses;
 using FinFlow.Domain.Abstractions;
 
 namespace FinFlow.Application.Tenant.Queries.GetPendingTenantRequests;

@@ -1,4 +1,5 @@
-using FinFlow.Application.Auth.Dtos;
+using FinFlow.Application.Tenant.Commands.CreateSharedTenant;
+using FinFlow.Application.Tenant.DTOs.Requests;
 using FinFlow.Domain.Entities;
 using FinFlow.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -21,8 +22,8 @@ public sealed class CreateTenantIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateSharedTenantAsync(
-            new CreateSharedTenantRequest(account.Id, currentMembership.Id, "New Workspace", "new-workspace", "VND"));
+        var result = await scope.Mediator.Send(
+            new CreateSharedTenantCommand(new CreateSharedTenantRequest(account.Id, currentMembership.Id, "New Workspace", "new-workspace", "VND")));
 
         Assert.True(result.IsSuccess, result.IsFailure ? $"{result.Error.Code}: {result.Error.Description}" : "Expected success.");
         Assert.Equal(account.Id, result.Value.Id);
@@ -66,8 +67,8 @@ public sealed class CreateTenantIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateSharedTenantAsync(
-            new CreateSharedTenantRequest(account.Id, ownerMembership.Id, "Another Workspace", "another-workspace", "VND"));
+        var result = await scope.Mediator.Send(
+            new CreateSharedTenantCommand(new CreateSharedTenantRequest(account.Id, ownerMembership.Id, "Another Workspace", "another-workspace", "VND")));
 
         Assert.True(result.IsFailure);
         Assert.Equal(TenantErrors.UserAlreadyHasTenant.Code, result.Error.Code);
@@ -85,8 +86,8 @@ public sealed class CreateTenantIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateSharedTenantAsync(
-            new CreateSharedTenantRequest(account.Id, currentMembership.Id, "Blocked Workspace", "blocked-workspace", "VND"));
+        var result = await scope.Mediator.Send(
+            new CreateSharedTenantCommand(new CreateSharedTenantRequest(account.Id, currentMembership.Id, "Blocked Workspace", "blocked-workspace", "VND")));
 
         Assert.True(result.IsFailure);
         Assert.Equal(TenantErrors.Forbidden.Code, result.Error.Code);
@@ -105,8 +106,8 @@ public sealed class CreateTenantIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateSharedTenantAsync(
-            new CreateSharedTenantRequest(account.Id, currentMembership.Id, "Duplicate Workspace", "taken-code", "VND"));
+        var result = await scope.Mediator.Send(
+            new CreateSharedTenantCommand(new CreateSharedTenantRequest(account.Id, currentMembership.Id, "Duplicate Workspace", "taken-code", "VND")));
 
         Assert.True(result.IsFailure);
         Assert.Equal(TenantErrors.CodeAlreadyExists.Code, result.Error.Code);
