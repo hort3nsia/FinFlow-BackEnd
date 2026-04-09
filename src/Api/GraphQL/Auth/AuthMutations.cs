@@ -1,13 +1,26 @@
 using FinFlow.Api.Extensions;
-using FinFlow.Application.Auth.Dtos;
-using FinFlow.Application.Auth.Interfaces;
-using FinFlow.Application.Auth.Responses;
-using FinFlow.Application.Membership.Responses;
-using FinFlow.Application.Tenant.Responses;
+using FinFlow.Application.Auth.DTOs.Requests;
+using FinFlow.Application.Auth.DTOs.Responses;
+using FinFlow.Application.Auth.Commands.ChangePassword;
+using FinFlow.Application.Auth.Commands.Login;
+using FinFlow.Application.Auth.Commands.Logout;
+using FinFlow.Application.Auth.Commands.RefreshToken;
+using FinFlow.Application.Auth.Commands.Register;
+using FinFlow.Application.Membership.Commands.AcceptInvite;
+using FinFlow.Application.Membership.Commands.InviteMember;
+using FinFlow.Application.Membership.Commands.SwitchWorkspace;
+using FinFlow.Application.Membership.DTOs.Requests;
+using FinFlow.Application.Tenant.Commands.ApproveTenant;
+using FinFlow.Application.Tenant.Commands.CreateIsolatedTenant;
+using FinFlow.Application.Tenant.Commands.CreateSharedTenant;
+using FinFlow.Application.Tenant.Commands.RejectTenant;
+using FinFlow.Application.Tenant.DTOs.Requests;
+using FinFlow.Application.Tenant.DTOs.Responses;
 using FinFlow.Domain.Enums;
 using HotChocolate;
 using HotChocolate.Authorization;
 using HotChocolate.Resolvers;
+using MediatR;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
 using DomainError = FinFlow.Domain.Abstractions.Error;
@@ -70,7 +83,7 @@ public class AuthMutations
 {
     public async Task<AuthPayload> LoginAsync(
         LoginInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
@@ -79,22 +92,23 @@ public class AuthMutations
         // (tránh việc dùng Guid làm vô hiệu hóa cơ chế chặn theo IP).
         if (clientIp == "unknown") clientIp = null;
         
-        var result = await authService.LoginAsync(new LoginRequest(input.Email, input.Password, input.TenantCode), clientIp, cancellationToken);
+        var result = await mediator.Send(
+            new LoginCommand(new LoginRequest(input.Email, input.Password, input.TenantCode, clientIp)),
+            cancellationToken);
         return HandleResult(result);
     }
 
     public async Task<AuthPayload> RegisterAsync(
         RegisterInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
         var clientIp = httpContextAccessor.HttpContext?.GetClientIpAddress();
         if (clientIp == "unknown") clientIp = null;
 
-        var result = await authService.RegisterAsync(
-            new RegisterRequest(input.Email, input.Password, input.Name, input.TenantCode, input.DepartmentName),
-            clientIp,
+        var result = await mediator.Send(
+            new RegisterCommand(new RegisterRequest(input.Email, input.Password, input.Name, input.TenantCode, input.DepartmentName, clientIp)),
             cancellationToken);
         return HandleResult(result);
     }
@@ -102,7 +116,7 @@ public class AuthMutations
     [Authorize]
     public async Task<AuthPayload> CreateSharedTenantAsync(
         CreateSharedTenantInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         IResolverContext context,
         CancellationToken cancellationToken)
     {
@@ -120,8 +134,8 @@ public class AuthMutations
             ? parsedMembershipId
             : null;
 
-        var result = await authService.CreateSharedTenantAsync(
-            new CreateSharedTenantRequest(accountId, membershipId, input.Name, input.TenantCode, input.Currency),
+        var result = await mediator.Send(
+            new CreateSharedTenantCommand(new CreateSharedTenantRequest(accountId, membershipId, input.Name, input.TenantCode, input.Currency)),
             cancellationToken);
 
         return HandleResult(result);
@@ -130,7 +144,7 @@ public class AuthMutations
     [Authorize]
     public async Task<TenantApprovalPayload> CreateIsolatedTenantAsync(
         CreateIsolatedTenantInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         IResolverContext context,
         CancellationToken cancellationToken)
     {
@@ -154,21 +168,22 @@ public class AuthMutations
 
         var companyInfo = input.CompanyInfo!;
 
-        var result = await authService.CreateIsolatedTenantAsync(
-            new CreateIsolatedTenantRequest(
-                accountId,
-                membershipId,
-                input.Name,
-                input.TenantCode,
-                input.Currency,
-                new CompanyInfoRequest(
-                    companyInfo.CompanyName!,
-                    companyInfo.TaxCode!,
-                    companyInfo.Address,
-                    companyInfo.Phone,
-                    companyInfo.ContactPerson,
-                    companyInfo.BusinessType,
-                    companyInfo.EmployeeCount)),
+        var result = await mediator.Send(
+            new CreateIsolatedTenantCommand(
+                new CreateIsolatedTenantRequest(
+                    accountId,
+                    membershipId,
+                    input.Name,
+                    input.TenantCode,
+                    input.Currency,
+                    new CompanyInfoRequest(
+                        companyInfo.CompanyName!,
+                        companyInfo.TaxCode!,
+                        companyInfo.Address,
+                        companyInfo.Phone,
+                        companyInfo.ContactPerson,
+                        companyInfo.BusinessType,
+                        companyInfo.EmployeeCount))),
             cancellationToken);
 
         if (result.IsFailure)
@@ -183,18 +198,19 @@ public class AuthMutations
 
     public async Task<AuthPayload> RefreshTokenAsync(
         RefreshTokenInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         CancellationToken cancellationToken)
     {
-        var result = await authService.RefreshTokenAsync(
-            new RefreshTokenRequest(input.RefreshToken), cancellationToken);
+        var result = await mediator.Send(
+            new RefreshTokenCommand(new RefreshTokenRequest(input.RefreshToken)),
+            cancellationToken);
         return HandleResult(result);
     }
 
     [Authorize]
     public async Task<AuthPayload> SwitchWorkspaceAsync(
         SwitchWorkspaceInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         IResolverContext context,
         CancellationToken cancellationToken)
     {
@@ -206,8 +222,8 @@ public class AuthMutations
         if (!Guid.TryParse(accountIdClaim, out var accountId))
             throw new GraphQLException(new HotChocolate.Error("User is not authenticated or token is invalid", "Account.Unauthorized"));
 
-        var result = await authService.SwitchWorkspaceAsync(
-            new SwitchWorkspaceRequest(accountId, input.MembershipId, input.CurrentRefreshToken),
+        var result = await mediator.Send(
+            new SwitchWorkspaceCommand(new SwitchWorkspaceRequest(accountId, input.MembershipId, input.CurrentRefreshToken)),
             cancellationToken);
 
         return HandleResult(result);
@@ -216,7 +232,7 @@ public class AuthMutations
     [Authorize]
     public async Task<InvitationPayload> InviteMemberAsync(
         InviteMemberInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         IResolverContext context,
         CancellationToken cancellationToken)
     {
@@ -230,8 +246,8 @@ public class AuthMutations
         if (!Guid.TryParse(accountIdClaim, out var accountId) || !Guid.TryParse(membershipIdClaim, out var membershipId))
             throw new GraphQLException(new HotChocolate.Error("User is not authenticated or token is invalid", "Account.Unauthorized"));
 
-        var result = await authService.InviteMemberAsync(
-            new InviteMemberRequest(accountId, membershipId, input.Email, input.Role),
+        var result = await mediator.Send(
+            new InviteMemberCommand(new InviteMemberRequest(accountId, membershipId, input.Email, input.Role)),
             cancellationToken);
 
         if (result.IsFailure)
@@ -249,10 +265,10 @@ public class AuthMutations
     [Authorize]
     public async Task<TenantApprovalDecisionPayload> ApproveTenantAsync(
         Guid requestId,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         CancellationToken cancellationToken)
     {
-        var result = await authService.ApproveTenantAsync(requestId, cancellationToken);
+        var result = await mediator.Send(new ApproveTenantCommand(new ApproveTenantRequest(requestId)), cancellationToken);
         if (result.IsFailure)
             throw new GraphQLException(new HotChocolate.Error(result.Error.Description, result.Error.Code));
 
@@ -268,10 +284,10 @@ public class AuthMutations
     public async Task<TenantApprovalDecisionPayload> RejectTenantAsync(
         Guid requestId,
         string reason,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         CancellationToken cancellationToken)
     {
-        var result = await authService.RejectTenantAsync(requestId, reason, cancellationToken);
+        var result = await mediator.Send(new RejectTenantCommand(new RejectTenantRequest(requestId, reason)), cancellationToken);
         if (result.IsFailure)
             throw new GraphQLException(new HotChocolate.Error(result.Error.Description, result.Error.Code));
 
@@ -285,15 +301,15 @@ public class AuthMutations
 
     public async Task<AuthPayload> AcceptInviteAsync(
         AcceptInviteInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken cancellationToken)
     {
         var clientIp = httpContextAccessor.HttpContext?.GetClientIpAddress();
         if (clientIp == "unknown") clientIp = null;
 
-        var result = await authService.AcceptInviteAsync(
-            new AcceptInviteRequest(input.InviteToken, input.Password, clientIp),
+        var result = await mediator.Send(
+            new AcceptInviteCommand(new AcceptInviteRequest(input.InviteToken, input.Password, clientIp)),
             cancellationToken);
 
         return HandleResult(result);
@@ -302,7 +318,7 @@ public class AuthMutations
     [Authorize]
     public async Task<bool> ChangePasswordAsync(
         ChangePasswordInput input,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         IResolverContext context,
         CancellationToken cancellationToken)
     {
@@ -314,8 +330,9 @@ public class AuthMutations
         if (!Guid.TryParse(accountIdClaim, out var accountId))
             throw new GraphQLException(new HotChocolate.Error("User is not authenticated or token is invalid", "Account.Unauthorized"));
 
-        var result = await authService.ChangePasswordAsync(
-            new ChangePasswordRequest(accountId, input.CurrentPassword, input.NewPassword), cancellationToken);
+        var result = await mediator.Send(
+            new ChangePasswordCommand(new ChangePasswordRequest(accountId, input.CurrentPassword, input.NewPassword)),
+            cancellationToken);
         if (result.IsFailure)
             throw new GraphQLException(new HotChocolate.Error(result.Error.Description, result.Error.Code));
         return true;
@@ -324,16 +341,16 @@ public class AuthMutations
     [Authorize]
     public async Task<bool> LogoutAsync(
         string refreshToken,
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         CancellationToken cancellationToken)
     {
-        var result = await authService.LogoutAsync(refreshToken, cancellationToken);
+        var result = await mediator.Send(new LogoutCommand(new LogoutRequest(refreshToken)), cancellationToken);
         if (result.IsFailure)
             throw new GraphQLException(new HotChocolate.Error(result.Error.Description, result.Error.Code));
         return true;
     }
 
-    private static AuthPayload HandleResult(FinFlow.Domain.Abstractions.Result<AuthResponse> result)
+    private static AuthPayload HandleResult(FinFlow.Domain.Abstractions.Result<FinFlow.Application.Auth.DTOs.Responses.AuthResponse> result)
     {
         if (result.IsFailure)
             throw ToGraphQlException(result.Error);
@@ -344,6 +361,6 @@ public class AuthMutations
     private static GraphQLException ToGraphQlException(DomainError error) =>
         new(new HotChocolate.Error(error.Description, error.Code));
 
-    private static AuthPayload ToPayload(AuthResponse response) =>
+    private static AuthPayload ToPayload(FinFlow.Application.Auth.DTOs.Responses.AuthResponse response) =>
         new(response.AccessToken, response.RefreshToken, response.Id, response.MembershipId, response.Email, response.Role, response.IdTenant);
 }

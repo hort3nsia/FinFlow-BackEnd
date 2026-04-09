@@ -1,4 +1,8 @@
-using FinFlow.Application.Auth.Dtos;
+using FinFlow.Application.Tenant.Commands.ApproveTenant;
+using FinFlow.Application.Tenant.Commands.CreateIsolatedTenant;
+using FinFlow.Application.Tenant.Commands.RejectTenant;
+using FinFlow.Application.Tenant.DTOs.Requests;
+using FinFlow.Application.Tenant.Queries.GetPendingTenantRequests;
 using FinFlow.Domain.Entities;
 using FinFlow.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -21,14 +25,15 @@ public sealed class TenantApprovalIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateIsolatedTenantAsync(
-            new CreateIsolatedTenantRequest(
-                account.Id,
-                currentMembership.Id,
-                "Enterprise Workspace",
-                "enterprise-workspace",
-                "VND",
-                new CompanyInfoRequest("Enterprise Co", "1234567890", "HN", "0123456789", "Alice", "Manufacturing", 500)));
+        var result = await scope.Mediator.Send(
+            new CreateIsolatedTenantCommand(
+                new CreateIsolatedTenantRequest(
+                    account.Id,
+                    currentMembership.Id,
+                    "Enterprise Workspace",
+                    "enterprise-workspace",
+                    "VND",
+                    new CompanyInfoRequest("Enterprise Co", "1234567890", "HN", "0123456789", "Alice", "Manufacturing", 500))));
 
         Assert.True(result.IsSuccess, result.IsFailure ? $"{result.Error.Code}: {result.Error.Description}" : "Expected success.");
         Assert.Equal(TenantApprovalStatus.Pending, result.Value.Status);
@@ -59,7 +64,7 @@ public sealed class TenantApprovalIntegrationTests
         await scope.SaveSeedAsync();
         scope.ActAsSuperAdmin();
 
-        var result = await scope.AuthService.GetPendingTenantRequestsAsync();
+        var result = await scope.Mediator.Send(new GetPendingTenantRequestsQuery());
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Value);
@@ -87,7 +92,7 @@ public sealed class TenantApprovalIntegrationTests
         await scope.SaveSeedAsync();
         scope.ActAsSuperAdmin();
 
-        var result = await scope.AuthService.ApproveTenantAsync(request.Id);
+        var result = await scope.Mediator.Send(new ApproveTenantCommand(new ApproveTenantRequest(request.Id)));
 
         Assert.True(result.IsSuccess, result.IsFailure ? $"{result.Error.Code}: {result.Error.Description}" : "Expected success.");
         Assert.Equal(TenantApprovalStatus.Approved, result.Value.Status);
@@ -125,7 +130,7 @@ public sealed class TenantApprovalIntegrationTests
         await scope.SaveSeedAsync();
         scope.ActAsSuperAdmin();
 
-        var result = await scope.AuthService.RejectTenantAsync(request.Id, "Missing enterprise verification");
+        var result = await scope.Mediator.Send(new RejectTenantCommand(new RejectTenantRequest(request.Id, "Missing enterprise verification")));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(TenantApprovalStatus.Rejected, result.Value.Status);
@@ -152,7 +157,7 @@ public sealed class TenantApprovalIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.ApproveTenantAsync(request.Id);
+        var result = await scope.Mediator.Send(new ApproveTenantCommand(new ApproveTenantRequest(request.Id)));
 
         Assert.True(result.IsFailure);
         Assert.Equal(TenantApprovalRequestErrors.Unauthorized.Code, result.Error.Code);
@@ -187,7 +192,7 @@ public sealed class TenantApprovalIntegrationTests
         await scope.SaveSeedAsync();
         scope.ActAsSuperAdmin();
 
-        var result = await scope.AuthService.ApproveTenantAsync(pendingRequest.Id);
+        var result = await scope.Mediator.Send(new ApproveTenantCommand(new ApproveTenantRequest(pendingRequest.Id)));
 
         Assert.True(result.IsFailure);
         Assert.Equal(TenantErrors.CodeBlocked.Code, result.Error.Code);
@@ -215,14 +220,15 @@ public sealed class TenantApprovalIntegrationTests
 
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateIsolatedTenantAsync(
-            new CreateIsolatedTenantRequest(
-                account.Id,
-                currentMembership.Id,
-                "Retry Enterprise",
-                "blocked-code",
-                "VND",
-                new CompanyInfoRequest("Retry Co", "1234567891")));
+        var result = await scope.Mediator.Send(
+            new CreateIsolatedTenantCommand(
+                new CreateIsolatedTenantRequest(
+                    account.Id,
+                    currentMembership.Id,
+                    "Retry Enterprise",
+                    "blocked-code",
+                    "VND",
+                    new CompanyInfoRequest("Retry Co", "1234567891"))));
 
         Assert.True(result.IsFailure);
         Assert.Equal(TenantErrors.CodeBlocked.Code, result.Error.Code);
@@ -241,14 +247,15 @@ public sealed class TenantApprovalIntegrationTests
         Assert.True(account.Deactivate().IsSuccess);
         await scope.SaveSeedAsync();
 
-        var result = await scope.AuthService.CreateIsolatedTenantAsync(
-            new CreateIsolatedTenantRequest(
-                account.Id,
-                currentMembership.Id,
-                "Inactive Requester Workspace",
-                "inactive-requester-workspace",
-                "VND",
-                new CompanyInfoRequest("Inactive Requester Co", "1234567890")));
+        var result = await scope.Mediator.Send(
+            new CreateIsolatedTenantCommand(
+                new CreateIsolatedTenantRequest(
+                    account.Id,
+                    currentMembership.Id,
+                    "Inactive Requester Workspace",
+                    "inactive-requester-workspace",
+                    "VND",
+                    new CompanyInfoRequest("Inactive Requester Co", "1234567890"))));
 
         Assert.True(result.IsFailure);
         Assert.Equal(AccountErrors.Unauthorized.Code, result.Error.Code);

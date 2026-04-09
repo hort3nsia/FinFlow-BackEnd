@@ -1,7 +1,8 @@
-using FinFlow.Application.Auth.Interfaces;
-using FinFlow.Application.Tenant.Responses;
+using FinFlow.Application.Tenant.DTOs.Responses;
 using HotChocolate.Authorization;
 using HotChocolate.Types;
+using MediatR;
+using FinFlow.Application.Tenant.Queries.GetPendingTenantRequests;
 
 namespace FinFlow.Api.GraphQL.Auth;
 
@@ -23,10 +24,10 @@ public sealed class AuthQueries
 {
     [Authorize]
     public async Task<IReadOnlyList<PendingTenantApprovalPayload>> PendingTenantRequestsAsync(
-        [Service] IAuthService authService,
+        [Service] IMediator mediator,
         CancellationToken cancellationToken)
     {
-        var result = await authService.GetPendingTenantRequestsAsync(cancellationToken);
+        var result = await mediator.Send(new GetPendingTenantRequestsQuery(), cancellationToken);
         if (result.IsFailure)
             throw new GraphQLException(new HotChocolate.Error(result.Error.Description, result.Error.Code));
 

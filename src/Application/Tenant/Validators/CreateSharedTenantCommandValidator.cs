@@ -1,4 +1,5 @@
 using FinFlow.Application.Tenant.Commands.CreateSharedTenant;
+using FinFlow.Application.Tenant.DTOs.Requests;
 using FluentValidation;
 
 namespace FinFlow.Application.Tenant.Validators;
@@ -7,9 +8,9 @@ public sealed class CreateSharedTenantCommandValidator : AbstractValidator<Creat
 {
     public CreateSharedTenantCommandValidator()
     {
-        RuleFor(x => x.AccountId).NotEmpty();
-        RuleFor(x => x.Name).NotEmpty();
-        RuleFor(x => x.TenantCode).NotEmpty();
-        RuleFor(x => x.Currency).NotEmpty();
+        RuleFor(x => x.Request.AccountId).NotEmpty();
+        RuleFor(x => x.Request.Name).NotEmpty();
+        RuleFor(x => x.Request.TenantCode).NotEmpty();
+        RuleFor(x => x.Request.Currency).NotEmpty();
     }
 }

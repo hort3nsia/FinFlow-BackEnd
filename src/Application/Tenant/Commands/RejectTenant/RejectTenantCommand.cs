@@ -1,7 +1,8 @@
 using FinFlow.Application.Common;
-using FinFlow.Application.Tenant.Responses;
+using FinFlow.Application.Tenant.DTOs.Requests;
+using FinFlow.Application.Tenant.DTOs.Responses;
 using FinFlow.Domain.Abstractions;
 
 namespace FinFlow.Application.Tenant.Commands.RejectTenant;
 
-public record RejectTenantCommand(Guid RequestId, string Reason) : ICommand<Result<TenantApprovalDecisionResponse>>;
+public record RejectTenantCommand(RejectTenantRequest Request) : ICommand<Result<TenantApprovalDecisionResponse>>;

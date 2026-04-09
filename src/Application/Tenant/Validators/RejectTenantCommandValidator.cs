@@ -7,7 +7,7 @@ public sealed class RejectTenantCommandValidator : AbstractValidator<RejectTenan
 {
     public RejectTenantCommandValidator()
     {
-        RuleFor(x => x.RequestId).NotEmpty();
-        RuleFor(x => x.Reason).NotEmpty();
+        RuleFor(x => x.Request.RequestId).NotEmpty();
+        RuleFor(x => x.Request.Reason).NotEmpty();
     }
 }
