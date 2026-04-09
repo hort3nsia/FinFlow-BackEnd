@@ -1,6 +1,9 @@
 using FinFlow.Api.Extensions;
 using FinFlow.Application.Auth.Dtos;
 using FinFlow.Application.Auth.Interfaces;
+using FinFlow.Application.Auth.Responses;
+using FinFlow.Application.Membership.Responses;
+using FinFlow.Application.Tenant.Responses;
 using FinFlow.Domain.Enums;
 using HotChocolate;
 using HotChocolate.Authorization;
