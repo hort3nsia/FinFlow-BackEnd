@@ -7,12 +7,13 @@ namespace FinFlow.Domain.Entities;
 
 public sealed class TenantMembership : Entity, IMultiTenant
 {
-    private TenantMembership(Guid id, Guid accountId, Guid idTenant, RoleType role)
+    private TenantMembership(Guid id, Guid accountId, Guid idTenant, RoleType role, bool isOwner)
     {
         Id = id;
         AccountId = accountId;
         IdTenant = idTenant;
         Role = role;
+        IsOwner = isOwner;
         CreatedAt = DateTime.UtcNow;
         IsActive = true;
     }
@@ -22,10 +23,11 @@ public sealed class TenantMembership : Entity, IMultiTenant
     public Guid AccountId { get; private set; }
     public Guid IdTenant { get; private set; }
     public RoleType Role { get; private set; }
+    public bool IsOwner { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public bool IsActive { get; private set; }
 
-    public static Result<TenantMembership> Create(Guid accountId, Guid idTenant, RoleType role)
+    public static Result<TenantMembership> Create(Guid accountId, Guid idTenant, RoleType role, bool isOwner = false)
     {
         if (accountId == Guid.Empty)
             return Result.Failure<TenantMembership>(TenantMembershipErrors.AccountRequired);
@@ -33,12 +35,16 @@ public sealed class TenantMembership : Entity, IMultiTenant
         if (idTenant == Guid.Empty)
             return Result.Failure<TenantMembership>(TenantMembershipErrors.TenantRequired);
 
-        var membership = new TenantMembership(Guid.NewGuid(), accountId, idTenant, role);
+        if (isOwner && role != RoleType.TenantAdmin)
+            return Result.Failure<TenantMembership>(TenantMembershipErrors.OwnerMustBeTenantAdmin);
+
+        var membership = new TenantMembership(Guid.NewGuid(), accountId, idTenant, role, isOwner);
         membership.RaiseDomainEvent(new TenantMembershipCreatedDomainEvent(
             membership.Id,
             membership.AccountId,
             membership.IdTenant,
-            membership.Role));
+            membership.Role,
+            membership.IsOwner));
 
         return membership;
     }

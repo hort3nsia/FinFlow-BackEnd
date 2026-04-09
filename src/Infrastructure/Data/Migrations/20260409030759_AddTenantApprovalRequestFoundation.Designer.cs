@@ -3,6 +3,7 @@ using System;
 using FinFlow.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FinFlow.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260409030759_AddTenantApprovalRequestFoundation")]
+    partial class AddTenantApprovalRequestFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -406,10 +409,6 @@ namespace FinFlow.Infrastructure.Data.Migrations
                         .HasMaxLength(15)
                         .HasColumnType("character varying(15)")
                         .HasColumnName("phone");
-
-                    b.Property<DateTime?>("RejectedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("rejected_at");
 
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(500)

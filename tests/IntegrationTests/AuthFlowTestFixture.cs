@@ -34,6 +34,7 @@ internal sealed class AuthFlowTestFixture
         var authService = new AuthService(
             new AccountRepository(dbContext),
             new TenantRepository(dbContext),
+            new TenantApprovalRequestRepository(dbContext),
             new TenantMembershipRepository(dbContext),
             new DepartmentRepository(dbContext),
             new InvitationRepository(dbContext),
@@ -80,9 +81,9 @@ internal sealed class AuthFlowTestFixture
             return account;
         }
 
-        public TenantMembership SeedMembership(Guid accountId, Guid tenantId, RoleType role)
+        public TenantMembership SeedMembership(Guid accountId, Guid tenantId, RoleType role, bool isOwner = false)
         {
-            var membership = TenantMembership.Create(accountId, tenantId, role).Value;
+            var membership = TenantMembership.Create(accountId, tenantId, role, isOwner).Value;
             DbContext.Add(membership);
             return membership;
         }
@@ -98,6 +99,38 @@ internal sealed class AuthFlowTestFixture
                 expiresAt ?? DateTime.UtcNow.AddDays(7)).Value;
             DbContext.Add(invitation);
             return invitation;
+        }
+
+        public TenantApprovalRequest SeedTenantApprovalRequest(
+            string tenantCode,
+            string name,
+            string companyName,
+            string taxCode,
+            Guid requestedById,
+            DateTime expiresAt,
+            string currency = "VND",
+            string? address = null,
+            string? phone = null,
+            string? contactPerson = null,
+            string? businessType = null,
+            int? employeeCount = null)
+        {
+            var request = TenantApprovalRequest.Create(
+                tenantCode,
+                name,
+                companyName,
+                taxCode,
+                address,
+                phone,
+                contactPerson,
+                businessType,
+                employeeCount,
+                currency,
+                requestedById,
+                expiresAt).Value;
+
+            DbContext.Add(request);
+            return request;
         }
 
         public RefreshToken SeedRefreshToken(string rawToken, Guid accountId, Guid membershipId, int expirationDays = 7)
@@ -116,6 +149,13 @@ internal sealed class AuthFlowTestFixture
             CurrentTenant.MembershipId = null;
             CurrentTenant.IsSuperAdmin = false;
             DbContext.ChangeTracker.Clear();
+        }
+
+        public void ActAsSuperAdmin()
+        {
+            CurrentTenant.Id = null;
+            CurrentTenant.MembershipId = null;
+            CurrentTenant.IsSuperAdmin = true;
         }
 
         public void Dispose() => DbContext.Dispose();
