@@ -4,6 +4,9 @@ using FinFlow.Application.Auth.Commands.Logout;
 using FinFlow.Application.Auth.Commands.RefreshToken;
 using FinFlow.Application.Auth.Commands.Register;
 using FinFlow.Application.Common.Abstractions;
+using FinFlow.Application.Membership.Commands.AcceptInvite;
+using FinFlow.Application.Membership.Commands.InviteMember;
+using FinFlow.Application.Membership.Commands.SwitchWorkspace;
 using FinFlow.Domain.Abstractions;
 using FinFlow.Domain.Accounts;
 using FinFlow.Domain.Departments;
@@ -209,6 +212,9 @@ internal sealed class AuthFlowTestFixture
         public RefreshTokenCommandHandler CreateRefreshTokenHandler() => ActivatorUtilities.CreateInstance<RefreshTokenCommandHandler>(ServiceProvider);
         public ChangePasswordCommandHandler CreateChangePasswordHandler() => ActivatorUtilities.CreateInstance<ChangePasswordCommandHandler>(ServiceProvider);
         public LogoutCommandHandler CreateLogoutHandler() => ActivatorUtilities.CreateInstance<LogoutCommandHandler>(ServiceProvider);
+        public SwitchWorkspaceCommandHandler CreateSwitchWorkspaceHandler() => ActivatorUtilities.CreateInstance<SwitchWorkspaceCommandHandler>(ServiceProvider);
+        public InviteMemberCommandHandler CreateInviteMemberHandler() => ActivatorUtilities.CreateInstance<InviteMemberCommandHandler>(ServiceProvider);
+        public AcceptInviteCommandHandler CreateAcceptInviteHandler() => ActivatorUtilities.CreateInstance<AcceptInviteCommandHandler>(ServiceProvider);
 
         public void Dispose()
         {
