@@ -7,6 +7,7 @@ public record TenantMembershipSummary(
     Guid AccountId,
     Guid IdTenant,
     RoleType Role,
+    bool IsOwner,
     bool IsActive,
     DateTime CreatedAt);
 
@@ -18,6 +19,7 @@ public interface ITenantMembershipRepository
     Task<IReadOnlyList<TenantMembershipSummary>> GetByAccountIdAsync(Guid accountId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TenantMembershipSummary>> GetByTenantIdAsync(Guid idTenant, CancellationToken cancellationToken = default);
     Task<bool> ExistsAsync(Guid accountId, Guid idTenant, CancellationToken cancellationToken = default);
+    Task<bool> ExistsOwnerByAccountIdAsync(Guid accountId, CancellationToken cancellationToken = default);
 
     Task<FinFlow.Domain.Entities.TenantMembership?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
 

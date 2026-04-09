@@ -7,7 +7,8 @@ public sealed record TenantMembershipCreatedDomainEvent(
     Guid MembershipId,
     Guid AccountId,
     Guid IdTenant,
-    RoleType Role) : IDomainEvent
+    RoleType Role,
+    bool IsOwner) : IDomainEvent
 {
     public DateTime OccurredOn { get; } = DateTime.UtcNow;
 }
