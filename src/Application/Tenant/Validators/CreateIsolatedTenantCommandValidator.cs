@@ -1,4 +1,5 @@
 using FinFlow.Application.Tenant.Commands.CreateIsolatedTenant;
+using FinFlow.Application.Tenant.DTOs.Requests;
 using FluentValidation;
 
 namespace FinFlow.Application.Tenant.Validators;
@@ -7,16 +8,16 @@ public sealed class CreateIsolatedTenantCommandValidator : AbstractValidator<Cre
 {
     public CreateIsolatedTenantCommandValidator()
     {
-        RuleFor(x => x.AccountId).NotEmpty();
-        RuleFor(x => x.Name).NotEmpty();
-        RuleFor(x => x.TenantCode).NotEmpty();
-        RuleFor(x => x.Currency).NotEmpty();
-        RuleFor(x => x.CompanyInfo).NotNull();
+        RuleFor(x => x.Request.AccountId).NotEmpty();
+        RuleFor(x => x.Request.Name).NotEmpty();
+        RuleFor(x => x.Request.TenantCode).NotEmpty();
+        RuleFor(x => x.Request.Currency).NotEmpty();
+        RuleFor(x => x.Request.CompanyInfo).NotNull();
 
-        When(x => x.CompanyInfo is not null, () =>
+        When(x => x.Request.CompanyInfo is not null, () =>
         {
-            RuleFor(x => x.CompanyInfo.CompanyName).NotEmpty();
-            RuleFor(x => x.CompanyInfo.TaxCode).NotEmpty();
+            RuleFor(x => x.Request.CompanyInfo!.CompanyName).NotEmpty();
+            RuleFor(x => x.Request.CompanyInfo!.TaxCode).NotEmpty();
         });
     }
 }

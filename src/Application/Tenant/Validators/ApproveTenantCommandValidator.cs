@@ -7,6 +7,6 @@ public sealed class ApproveTenantCommandValidator : AbstractValidator<ApproveTen
 {
     public ApproveTenantCommandValidator()
     {
-        RuleFor(x => x.RequestId).NotEmpty();
+        RuleFor(x => x.Request.RequestId).NotEmpty();
     }
 }
