@@ -5,12 +5,11 @@ namespace FinFlow.Domain.Entities;
 
 public sealed class Account : Entity
 {
-    private Account(Guid id, string email, string passwordHash, Guid idDepartment)
+    private Account(Guid id, string email, string passwordHash)
     {
         Id = id;
         Email = email;
         PasswordHash = passwordHash;
-        IdDepartment = idDepartment;
         IsActive = true;
         CreatedAt = DateTime.UtcNow;
     }
@@ -19,11 +18,10 @@ public sealed class Account : Entity
 
     public string Email { get; private set; } = null!;
     public string PasswordHash { get; private set; } = null!;
-    public Guid IdDepartment { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public bool IsActive { get; private set; }
 
-    public static Result<Account> Create(string email, string passwordHash, Guid idDepartment)
+    public static Result<Account> Create(string email, string passwordHash)
     {
         if (string.IsNullOrWhiteSpace(email))
             return Result.Failure<Account>(AccountErrors.EmailRequired);
@@ -32,7 +30,7 @@ public sealed class Account : Entity
         if (string.IsNullOrWhiteSpace(passwordHash))
             return Result.Failure<Account>(AccountErrors.PasswordRequired);
 
-        var account = new Account(Guid.NewGuid(), email.ToLowerInvariant(), passwordHash, idDepartment);
+        var account = new Account(Guid.NewGuid(), email.ToLowerInvariant(), passwordHash);
         account.RaiseDomainEvent(new AccountCreatedDomainEvent(account.Id, account.Email));
         return account;
     }
@@ -43,13 +41,6 @@ public sealed class Account : Entity
             return Result.Failure(AccountErrors.PasswordRequired);
 
         PasswordHash = newPasswordHash;
-        return Result.Success();
-    }
-
-    public Result ChangeDepartment(Guid idDepartment)
-    {
-        if (IdDepartment == idDepartment) return Result.Failure(AccountErrors.SameDepartment);
-        IdDepartment = idDepartment;
         return Result.Success();
     }
 

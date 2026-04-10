@@ -23,8 +23,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
             .IsRequired();
 
         builder.Property(x => x.MembershipId)
-            .HasColumnName("membership_id")
-            .IsRequired();
+            .HasColumnName("membership_id");
 
         builder.Property(x => x.ExpiresAt)
             .HasColumnName("expires_at")
