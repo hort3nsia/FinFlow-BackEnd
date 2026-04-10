@@ -3,7 +3,7 @@ using FinFlow.Domain.Entities;
 namespace FinFlow.Domain.Accounts;
 
 public record AccountLoginInfo(Guid Id, string Email, string PasswordHash, bool IsActive);
-public record AccountSummary(Guid Id, string Email, Guid IdDepartment, bool IsActive);
+public record AccountSummary(Guid Id, string Email, bool IsActive);
 
 public interface IAccountRepository
 {

@@ -20,6 +20,19 @@ public class JwtTokenService : ITokenService
 
     public int RefreshTokenExpirationDays => _jwtSettings.RefreshTokenExpirationDays;
 
+    public string GenerateAccountAccessToken(Guid id, string email)
+    {
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, email),
+            new Claim("SessionKind", "account"),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        return WriteToken(claims);
+    }
+
     public string GenerateAccessToken(Guid id, string email, string role, Guid idTenant, Guid membershipId)
     {
         var claims = new[]
@@ -29,9 +42,15 @@ public class JwtTokenService : ITokenService
             new Claim("MembershipId", membershipId.ToString()),
             new Claim("IdTenant", idTenant.ToString()),
             new Claim(ClaimTypes.Role, role),
+            new Claim("SessionKind", "workspace"),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
+        return WriteToken(claims);
+    }
+
+    private string WriteToken(IEnumerable<Claim> claims)
+    {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
