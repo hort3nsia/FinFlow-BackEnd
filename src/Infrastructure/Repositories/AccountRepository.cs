@@ -15,7 +15,7 @@ internal sealed class AccountRepository : IAccountRepository
         await _dbContext.Set<Account>()
             .AsNoTracking()
             .Where(a => a.Id == id)
-            .Select(a => new AccountSummary(a.Id, a.Email, a.IsActive))
+            .Select(a => new AccountSummary(a.Id, a.Email, a.IsActive, a.IsEmailVerified, a.EmailVerifiedAt))
             .FirstOrDefaultAsync(cancellationToken);
 
     // Read Method: Returns DTO via Select projection 
@@ -28,7 +28,7 @@ internal sealed class AccountRepository : IAccountRepository
             .AsNoTracking()
             .IgnoreQueryFilters()
             .Where(a => a.Email == normalizedEmail)
-            .Select(a => new AccountLoginInfo(a.Id, a.Email, a.PasswordHash, a.IsActive))
+            .Select(a => new AccountLoginInfo(a.Id, a.Email, a.PasswordHash, a.IsActive, a.IsEmailVerified, a.EmailVerifiedAt))
             .ToListAsync(cancellationToken);
 
         if (accounts.Count > 1)
@@ -45,7 +45,7 @@ internal sealed class AccountRepository : IAccountRepository
             .AsNoTracking()
             .IgnoreQueryFilters()
             .Where(a => a.Id == id)
-            .Select(a => new AccountLoginInfo(a.Id, a.Email, a.PasswordHash, a.IsActive))
+            .Select(a => new AccountLoginInfo(a.Id, a.Email, a.PasswordHash, a.IsActive, a.IsEmailVerified, a.EmailVerifiedAt))
             .FirstOrDefaultAsync(cancellationToken);
 
     // Read Method: Exists check ignoring tenant scope 

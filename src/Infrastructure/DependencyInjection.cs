@@ -2,15 +2,18 @@ using FinFlow.Domain.Abstractions;
 using FinFlow.Domain.Accounts;
 using FinFlow.Domain.Departments;
 using FinFlow.Domain.Invitations;
+using FinFlow.Domain.EmailChallenges;
 using FinFlow.Domain.RefreshTokens;
 using FinFlow.Domain.Tenants;
 using FinFlow.Domain.TenantApprovals;
 using FinFlow.Domain.TenantMemberships;
 using FinFlow.Infrastructure.Repositories;
 using FinFlow.Application.Common.Abstractions;
+using FinFlow.Infrastructure.Auth.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace FinFlow.Infrastructure;
@@ -33,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IDepartmentRepository, DepartmentRepository>();
         services.AddScoped<IAccountRepository, AccountRepository>();
+        services.AddScoped<IEmailChallengeRepository, EmailChallengeRepository>();
         services.AddScoped<ITenantMembershipRepository, TenantMembershipRepository>();
         services.AddScoped<ITenantApprovalRequestRepository, TenantApprovalRequestRepository>();
         services.AddScoped<IInvitationRepository, InvitationRepository>();
@@ -50,6 +54,13 @@ public static class DependencyInjection
         services.AddSingleton<ITokenService, Auth.JwtTokenService>();
         services.AddSingleton<Auth.JwtTokenService>(sp => (Auth.JwtTokenService)sp.GetRequiredService<ITokenService>());
         services.AddSingleton<IPasswordHasher, Auth.BcryptPasswordHasher>();
+        services.AddSingleton<IClock, Auth.SystemClock>();
+        services.Configure<AuthChallengeOptions>(configuration.GetSection("AuthChallenge"));
+        services.Configure<EmailDeliveryOptions>(configuration.GetSection("EmailDelivery"));
+        services.Configure<SmtpEmailSenderOptions>(configuration.GetSection("EmailSmtp"));
+        services.AddSingleton<IRegistrationChallengeSettings>(sp => sp.GetRequiredService<IOptions<AuthChallengeOptions>>().Value);
+        services.AddSingleton<IEmailChallengeSecretService, EmailChallengeSecretService>();
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
         return services;
     }

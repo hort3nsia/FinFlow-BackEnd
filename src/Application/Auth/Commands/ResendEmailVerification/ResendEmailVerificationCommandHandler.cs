@@ -10,28 +10,24 @@ using FinFlow.Domain.Enums;
 using FinFlow.Domain.Interfaces;
 using System.Net;
 
-namespace FinFlow.Application.Auth.Commands.Register;
+namespace FinFlow.Application.Auth.Commands.ResendEmailVerification;
 
-public sealed class RegisterCommandHandler : MediatR.IRequestHandler<RegisterCommand, Result<RegistrationPendingResponse>>
+public sealed class ResendEmailVerificationCommandHandler : MediatR.IRequestHandler<ResendEmailVerificationCommand, Result<ChallengeDispatchResponse>>
 {
     private const string VerificationLinkQueryKey = "token";
 
     private readonly IAccountRepository _accountRepository;
     private readonly IEmailChallengeRepository _emailChallengeRepository;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IPasswordHasher _passwordHasher;
-    private readonly ILoginRateLimiter _rateLimiter;
     private readonly IEmailChallengeSecretService _secretService;
     private readonly IEmailSender _emailSender;
     private readonly IClock _clock;
     private readonly IRegistrationChallengeSettings _challengeSettings;
 
-    public RegisterCommandHandler(
+    public ResendEmailVerificationCommandHandler(
         IAccountRepository accountRepository,
         IEmailChallengeRepository emailChallengeRepository,
         IUnitOfWork unitOfWork,
-        IPasswordHasher passwordHasher,
-        ILoginRateLimiter rateLimiter,
         IEmailChallengeSecretService secretService,
         IEmailSender emailSender,
         IClock clock,
@@ -40,42 +36,44 @@ public sealed class RegisterCommandHandler : MediatR.IRequestHandler<RegisterCom
         _accountRepository = accountRepository;
         _emailChallengeRepository = emailChallengeRepository;
         _unitOfWork = unitOfWork;
-        _passwordHasher = passwordHasher;
-        _rateLimiter = rateLimiter;
         _secretService = secretService;
         _emailSender = emailSender;
         _clock = clock;
         _challengeSettings = challengeSettings;
     }
 
-    public async Task<Result<RegistrationPendingResponse>> Handle(RegisterCommand command, CancellationToken cancellationToken)
+    public async Task<Result<ChallengeDispatchResponse>> Handle(ResendEmailVerificationCommand command, CancellationToken cancellationToken)
     {
         var request = command.Request;
+        var accountInfo = await _accountRepository.GetLoginInfoByEmailAsync(request.Email, cancellationToken);
+        var cooldownSeconds = Math.Max(0, _challengeSettings.VerificationCooldownSeconds);
 
-        if (await _rateLimiter.IsBlockedAsync(request.ClientIp, request.Email))
-            return Result.Failure<RegistrationPendingResponse>(AccountErrors.TooManyRequests);
+        if (accountInfo is null || !accountInfo.IsActive || accountInfo.IsEmailVerified)
+            return Result.Success(new ChallengeDispatchResponse(true, cooldownSeconds));
 
-        if (await _accountRepository.ExistsByEmailIgnoringTenantAsync(request.Email, cancellationToken))
-        {
-            await _rateLimiter.RecordFailureAsync(request.ClientIp, request.Email);
-            return Result.Failure<RegistrationPendingResponse>(AccountErrors.EmailAlreadyExists);
-        }
-
-        if (!PasswordRules.IsStrong(request.Password))
-        {
-            await _rateLimiter.RecordFailureAsync(request.ClientIp, request.Email);
-            return Result.Failure<RegistrationPendingResponse>(AccountErrors.PasswordTooWeak);
-        }
+        var account = await _accountRepository.GetByIdForUpdateAsync(accountInfo.Id, cancellationToken);
+        if (account is null)
+            return Result.Success(new ChallengeDispatchResponse(true, cooldownSeconds));
 
         var nowUtc = _clock.UtcNow;
-        var accountResult = Account.Create(request.Email, _passwordHasher.HashPassword(request.Password), nowUtc);
-        if (accountResult.IsFailure)
+        var latestChallenge = await _emailChallengeRepository.GetLatestByAccountIdAndPurposeForUpdateAsync(
+            account.Id,
+            EmailChallengePurpose.VerifyEmail,
+            cancellationToken);
+
+        if (latestChallenge is not null && latestChallenge.IsUsableAt(nowUtc))
         {
-            await _rateLimiter.RecordFailureAsync(request.ClientIp, request.Email);
-            return Result.Failure<RegistrationPendingResponse>(accountResult.Error);
+            var resendAvailableAt = (latestChallenge.LastSentAt ?? latestChallenge.CreatedAt).AddSeconds(cooldownSeconds);
+            if (resendAvailableAt > nowUtc)
+                return Result.Success(new ChallengeDispatchResponse(true, cooldownSeconds));
+
+            var revokeResult = latestChallenge.Revoke(nowUtc);
+            if (revokeResult.IsFailure)
+                return Result.Failure<ChallengeDispatchResponse>(revokeResult.Error);
+
+            _emailChallengeRepository.Update(latestChallenge);
         }
 
-        var account = accountResult.Value;
         var rawToken = _secretService.GenerateVerificationToken();
         var rawOtp = _secretService.GenerateVerificationOtp();
         var tokenHash = _secretService.HashChallengeToken(rawToken);
@@ -92,14 +90,11 @@ public sealed class RegisterCommandHandler : MediatR.IRequestHandler<RegisterCom
             lastSentAtUtc: nowUtc);
 
         if (challengeResult.IsFailure)
-        {
-            await _rateLimiter.RecordFailureAsync(request.ClientIp, request.Email);
-            return Result.Failure<RegistrationPendingResponse>(challengeResult.Error);
-        }
+            return Result.Failure<ChallengeDispatchResponse>(challengeResult.Error);
 
         var verificationLinkResult = BuildVerificationLink(rawToken);
         if (verificationLinkResult.IsFailure)
-            return Result.Failure<RegistrationPendingResponse>(verificationLinkResult.Error);
+            return Result.Failure<ChallengeDispatchResponse>(verificationLinkResult.Error);
 
         try
         {
@@ -107,19 +102,13 @@ public sealed class RegisterCommandHandler : MediatR.IRequestHandler<RegisterCom
         }
         catch
         {
-            return Result.Failure<RegistrationPendingResponse>(EmailChallengeErrors.EmailDeliveryFailed);
+            return Result.Failure<ChallengeDispatchResponse>(EmailChallengeErrors.EmailDeliveryFailed);
         }
 
-        _accountRepository.Add(account);
         _emailChallengeRepository.Add(challengeResult.Value);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await _rateLimiter.ResetAccountAsync(request.Email);
 
-        return Result.Success(new RegistrationPendingResponse(
-            account.Id,
-            account.Email,
-            true,
-            _challengeSettings.VerificationCooldownSeconds));
+        return Result.Success(new ChallengeDispatchResponse(true, cooldownSeconds));
     }
 
     private Result<string> BuildVerificationLink(string rawToken)

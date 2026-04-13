@@ -24,6 +24,7 @@ namespace FinFlow.IntegrationTests;
 internal sealed class GraphQlApiTestFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = $"finflow-api-tests-{Guid.NewGuid():N}";
+    public RecordingEmailSender EmailSender { get; } = new();
 
     protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
     {
@@ -37,11 +38,13 @@ internal sealed class GraphQlApiTestFactory : WebApplicationFactory<Program>
             services.RemoveAll(typeof(IUnitOfWork));
             services.RemoveAll(typeof(ILoginRateLimiter));
             services.RemoveAll(typeof(ICurrentTenant));
+            services.RemoveAll(typeof(IEmailSender));
 
             services.AddScoped<ICurrentTenant, TestHttpCurrentTenant>();
             services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase(_databaseName));
             services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<ApplicationDbContext>());
             services.AddSingleton<ILoginRateLimiter, NoOpLoginRateLimiter>();
+            services.AddSingleton<IEmailSender>(EmailSender);
             services.AddAuthentication(options =>
                 {
                     options.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
@@ -111,6 +114,24 @@ internal sealed class GraphQlApiTestFactory : WebApplicationFactory<Program>
         public Task<bool> IsBlockedAsync(string? ip, string email, Guid? tenantId = null) => Task.FromResult(false);
         public Task RecordFailureAsync(string? ip, string email, Guid? tenantId = null) => Task.CompletedTask;
         public Task ResetAccountAsync(string email, Guid? tenantId = null) => Task.CompletedTask;
+    }
+
+    internal sealed class RecordingEmailSender : IEmailSender
+    {
+        public List<(string Email, string VerificationLink, string Otp)> VerificationEmails { get; } = new();
+        public List<(string Email, string ResetLink, string Otp)> PasswordResetEmails { get; } = new();
+
+        public Task SendVerificationEmailAsync(string email, string verificationLink, string otp, CancellationToken cancellationToken = default)
+        {
+            VerificationEmails.Add((email, verificationLink, otp));
+            return Task.CompletedTask;
+        }
+
+        public Task SendPasswordResetEmailAsync(string email, string resetLink, string otp, CancellationToken cancellationToken = default)
+        {
+            PasswordResetEmails.Add((email, resetLink, otp));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class TestHttpCurrentTenant : ICurrentTenant

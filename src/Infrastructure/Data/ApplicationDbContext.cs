@@ -16,6 +16,8 @@ public class ApplicationDbContext : DbContext, IUnitOfWork
         _currentTenant = currentTenant;
     }
 
+    public DbSet<EmailChallenge> EmailChallenges => Set<EmailChallenge>();
+
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         var provisionedTenantIds = ChangeTracker.Entries<Tenant>()
