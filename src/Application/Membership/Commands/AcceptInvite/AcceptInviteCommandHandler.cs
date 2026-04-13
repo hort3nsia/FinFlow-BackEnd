@@ -98,7 +98,7 @@ public sealed class AcceptInviteCommandHandler : MediatR.IRequestHandler<AcceptI
 
             var account = createAccountResult.Value;
             _accountRepository.Add(account);
-            accountInfo = new AccountLoginInfo(account.Id, account.Email, account.PasswordHash, account.IsActive);
+            accountInfo = new AccountLoginInfo(account.Id, account.Email, account.PasswordHash, account.IsActive, account.IsEmailVerified, account.EmailVerifiedAt);
             accountId = account.Id;
         }
 

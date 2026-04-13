@@ -174,11 +174,16 @@ public sealed class AuthFlowIntegrationTests
             .IgnoreQueryFilters()
             .SingleAsync(x => x.Email == "register.no.department@finflow.test");
 
-        Assert.Equal(result.Value.Id, createdAccount.Id);
-        Assert.Equal("account", result.Value.SessionKind);
+        Assert.Equal(result.Value.AccountId, createdAccount.Id);
+        Assert.Equal("register.no.department@finflow.test", result.Value.Email);
+        Assert.True(result.Value.RequiresEmailVerification);
+        Assert.Equal(90, result.Value.CooldownSeconds);
+        Assert.Single(scope.EmailSender.VerificationEmails);
+        Assert.Equal(createdAccount.Email, scope.EmailSender.VerificationEmails.Single().Email);
         Assert.Equal(0, await scope.DbContext.Set<Tenant>().IgnoreQueryFilters().CountAsync());
         Assert.Equal(0, await scope.DbContext.Set<Department>().IgnoreQueryFilters().CountAsync());
         Assert.Equal(0, await scope.DbContext.Set<TenantMembership>().IgnoreQueryFilters().CountAsync());
+        Assert.Equal(0, await scope.DbContext.Set<RefreshToken>().IgnoreQueryFilters().CountAsync());
     }
 
     [Fact]

@@ -3,6 +3,9 @@ using FinFlow.Application.Auth.Commands.Login;
 using FinFlow.Application.Auth.Commands.Logout;
 using FinFlow.Application.Auth.Commands.RefreshToken;
 using FinFlow.Application.Auth.Commands.Register;
+using FinFlow.Application.Auth.Commands.ResendEmailVerification;
+using FinFlow.Application.Auth.Commands.VerifyEmailByOtp;
+using FinFlow.Application.Auth.Commands.VerifyEmailByToken;
 using FinFlow.Application;
 using FinFlow.Application.Common.Abstractions;
 using FinFlow.Application.Membership.Commands.AcceptInvite;
@@ -20,6 +23,7 @@ using FinFlow.Domain.Entities;
 using FinFlow.Domain.Enums;
 using FinFlow.Domain.Interfaces;
 using FinFlow.Domain.Invitations;
+using FinFlow.Domain.EmailChallenges;
 using FinFlow.Domain.RefreshTokens;
 using FinFlow.Domain.Settings;
 using FinFlow.Domain.TenantApprovals;
@@ -27,6 +31,7 @@ using FinFlow.Domain.TenantMemberships;
 using FinFlow.Domain.Tenants;
 using FinFlow.Infrastructure;
 using FinFlow.Infrastructure.Auth;
+using FinFlow.Infrastructure.Auth.Email;
 using FinFlow.Infrastructure.Repositories;
 using FinFlow.Infrastructure.Security;
 using MediatR;
@@ -47,10 +52,16 @@ internal sealed class AuthFlowTestFixture
         RefreshTokenExpirationDays = 7
     });
 
-    public TestScope CreateScope()
+    public TestScope CreateScope(
+        IEmailSender? emailSenderOverride = null,
+        Action<AuthChallengeOptions>? configureChallengeOptions = null)
     {
         var currentTenant = new CurrentTenant();
         var rateLimiter = new TestLoginRateLimiter();
+        var recordingEmailSender = emailSenderOverride as RecordingEmailSender ?? new RecordingEmailSender();
+        var emailSender = emailSenderOverride ?? recordingEmailSender;
+        var secretService = new TestEmailChallengeSecretService();
+        var clock = new FixedClock(new DateTime(2026, 4, 13, 2, 0, 0, DateTimeKind.Utc));
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
@@ -69,20 +80,41 @@ internal sealed class AuthFlowTestFixture
         services.AddScoped<IDepartmentRepository>(_ => new DepartmentRepository(dbContext));
         services.AddScoped<IInvitationRepository>(_ => new InvitationRepository(dbContext));
         services.AddScoped<IRefreshTokenRepository>(_ => new RefreshTokenRepository(dbContext));
+        services.AddScoped<IEmailChallengeRepository>(_ => new EmailChallengeRepository(dbContext));
+        services.AddSingleton<IEmailSender>(emailSender);
+        services.AddSingleton<IEmailChallengeSecretService>(secretService);
+        services.AddSingleton<IClock>(clock);
         services.AddScoped<IUnitOfWork>(_ => dbContext);
         services.AddSingleton<ICurrentTenant>(currentTenant);
         services.AddSingleton<ILoginRateLimiter>(rateLimiter);
         services.AddSingleton<ITokenService>(tokenService);
         services.AddSingleton<IPasswordHasher>(passwordHasher);
+        var challengeOptions = new AuthChallengeOptions
+        {
+            VerificationTokenLifetimeMinutes = 15,
+            VerificationCooldownSeconds = 90,
+            VerificationLinkBaseUrl = "https://verify.finflow.test/email",
+            OtpLength = 6,
+            TokenHashKey = "test-challenge-secret-key"
+        };
+        configureChallengeOptions?.Invoke(challengeOptions);
+        services.AddSingleton<IOptions<AuthChallengeOptions>>(Options.Create(challengeOptions));
+        services.AddSingleton<IRegistrationChallengeSettings>(sp => sp.GetRequiredService<IOptions<AuthChallengeOptions>>().Value);
+        services.AddSingleton<IOptions<EmailDeliveryOptions>>(Options.Create(new EmailDeliveryOptions
+        {
+            SenderAddress = "no-reply@finflow.test",
+            SenderName = "FinFlow",
+            VerificationSubject = "Verify your email"
+        }));
         var serviceProvider = services.BuildServiceProvider();
         var mediator = serviceProvider.GetRequiredService<IMediator>();
 
-        return new TestScope(dbContext, currentTenant, mediator, rateLimiter, tokenService, passwordHasher, serviceProvider);
+        return new TestScope(dbContext, currentTenant, mediator, rateLimiter, tokenService, passwordHasher, recordingEmailSender, secretService, clock, serviceProvider);
     }
 
     internal sealed class TestScope : IDisposable
     {
-        public TestScope(ApplicationDbContext dbContext, CurrentTenant currentTenant, IMediator mediator, TestLoginRateLimiter rateLimiter, ITokenService tokenService, IPasswordHasher passwordHasher, ServiceProvider serviceProvider)
+        public TestScope(ApplicationDbContext dbContext, CurrentTenant currentTenant, IMediator mediator, TestLoginRateLimiter rateLimiter, ITokenService tokenService, IPasswordHasher passwordHasher, RecordingEmailSender emailSender, TestEmailChallengeSecretService secretService, FixedClock clock, ServiceProvider serviceProvider)
         {
             DbContext = dbContext;
             CurrentTenant = currentTenant;
@@ -90,6 +122,9 @@ internal sealed class AuthFlowTestFixture
             RateLimiter = rateLimiter;
             TokenService = tokenService;
             PasswordHasher = passwordHasher;
+            EmailSender = emailSender;
+            SecretService = secretService;
+            Clock = clock;
             ServiceProvider = serviceProvider;
         }
 
@@ -99,6 +134,9 @@ internal sealed class AuthFlowTestFixture
         public TestLoginRateLimiter RateLimiter { get; }
         public ITokenService TokenService { get; }
         public IPasswordHasher PasswordHasher { get; }
+        public RecordingEmailSender EmailSender { get; }
+        public TestEmailChallengeSecretService SecretService { get; }
+        public FixedClock Clock { get; }
         public ServiceProvider ServiceProvider { get; }
 
         public Tenant SeedTenant(string name, string code)
@@ -117,7 +155,7 @@ internal sealed class AuthFlowTestFixture
 
         public Account SeedAccount(string email, string password)
         {
-            var account = Account.Create(email, BCrypt.Net.BCrypt.HashPassword(password)).Value;
+            var account = Account.Create(email, BCrypt.Net.BCrypt.HashPassword(password), Clock.UtcNow.AddMinutes(-30)).Value;
             DbContext.Add(account);
             return account;
         }
@@ -214,6 +252,9 @@ internal sealed class AuthFlowTestFixture
         public RefreshTokenCommandHandler CreateRefreshTokenHandler() => ActivatorUtilities.CreateInstance<RefreshTokenCommandHandler>(ServiceProvider);
         public ChangePasswordCommandHandler CreateChangePasswordHandler() => ActivatorUtilities.CreateInstance<ChangePasswordCommandHandler>(ServiceProvider);
         public LogoutCommandHandler CreateLogoutHandler() => ActivatorUtilities.CreateInstance<LogoutCommandHandler>(ServiceProvider);
+        public VerifyEmailByTokenCommandHandler CreateVerifyEmailByTokenHandler() => ActivatorUtilities.CreateInstance<VerifyEmailByTokenCommandHandler>(ServiceProvider);
+        public VerifyEmailByOtpCommandHandler CreateVerifyEmailByOtpHandler() => ActivatorUtilities.CreateInstance<VerifyEmailByOtpCommandHandler>(ServiceProvider);
+        public ResendEmailVerificationCommandHandler CreateResendEmailVerificationHandler() => ActivatorUtilities.CreateInstance<ResendEmailVerificationCommandHandler>(ServiceProvider);
         public SwitchWorkspaceCommandHandler CreateSwitchWorkspaceHandler() => ActivatorUtilities.CreateInstance<SwitchWorkspaceCommandHandler>(ServiceProvider);
         public InviteMemberCommandHandler CreateInviteMemberHandler() => ActivatorUtilities.CreateInstance<InviteMemberCommandHandler>(ServiceProvider);
         public AcceptInviteCommandHandler CreateAcceptInviteHandler() => ActivatorUtilities.CreateInstance<AcceptInviteCommandHandler>(ServiceProvider);
@@ -241,5 +282,43 @@ internal sealed class AuthFlowTestFixture
             return Task.CompletedTask;
         }
         public Task ResetAccountAsync(string email, Guid? tenantId = null) => Task.CompletedTask;
+    }
+
+    internal sealed class RecordingEmailSender : IEmailSender
+    {
+        public List<VerificationEmail> VerificationEmails { get; } = new();
+        public List<PasswordResetEmail> PasswordResetEmails { get; } = new();
+
+        public Task SendVerificationEmailAsync(string email, string verificationLink, string otp, CancellationToken cancellationToken = default)
+        {
+            VerificationEmails.Add(new VerificationEmail(email, verificationLink, otp));
+            return Task.CompletedTask;
+        }
+
+        public Task SendPasswordResetEmailAsync(string email, string resetLink, string otp, CancellationToken cancellationToken = default)
+        {
+            PasswordResetEmails.Add(new PasswordResetEmail(email, resetLink, otp));
+            return Task.CompletedTask;
+        }
+    }
+
+    internal sealed class TestEmailChallengeSecretService : IEmailChallengeSecretService
+    {
+        private int _tokenCounter;
+        private int _otpCounter;
+
+        public string GenerateVerificationToken() => $"verification-token-{++_tokenCounter}";
+        public string GenerateVerificationOtp() => $"{100000 + ++_otpCounter}";
+        public string HashChallengeToken(string token) => $"token-hash:{token}";
+        public string HashChallengeOtp(string otp) => $"otp-hash:{otp}";
+    }
+
+    internal sealed record VerificationEmail(string Email, string VerificationLink, string Otp);
+    internal sealed record PasswordResetEmail(string Email, string ResetLink, string Otp);
+
+    internal sealed class FixedClock : IClock
+    {
+        public FixedClock(DateTime utcNow) => UtcNow = utcNow;
+        public DateTime UtcNow { get; }
     }
 }

@@ -15,6 +15,10 @@ public static class AccountErrors
     public static readonly Error SameDepartment = new("Account.SameDepartment", "The account is already in this department");
     public static readonly Error AlreadyDeactivated = new("Account.AlreadyDeactivated", "The account is already deactivated");
     public static readonly Error AlreadyActive = new("Account.AlreadyActive", "The account is already active");
+    public static readonly Error EmailAlreadyVerified = new("Account.EmailAlreadyVerified", "The account email is already verified");
+    public static readonly Error InvalidCreatedAt = new("Account.InvalidCreatedAt", "Account created timestamp must be UTC");
+    public static readonly Error InvalidEmailVerifiedAt = new("Account.InvalidEmailVerifiedAt", "Email verified timestamp must be UTC");
+    public static readonly Error EmailVerifiedBeforeCreatedAt = new("Account.EmailVerifiedBeforeCreatedAt", "Email verified timestamp cannot be earlier than account creation");
     public static readonly Error Unauthorized = new("Account.Unauthorized", "User is not authenticated or token is invalid");
     public static readonly Error TooManyRequests = new("Account.TooManyRequests", "Too many login attempts. Please try again later.");
     public static readonly Error WorkspaceSelectionRequired = new("Account.WorkspaceSelectionRequired", "Multiple workspaces found. Workspace selection is required.");

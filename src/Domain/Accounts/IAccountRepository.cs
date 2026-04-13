@@ -2,8 +2,8 @@ using FinFlow.Domain.Entities;
 
 namespace FinFlow.Domain.Accounts;
 
-public record AccountLoginInfo(Guid Id, string Email, string PasswordHash, bool IsActive);
-public record AccountSummary(Guid Id, string Email, bool IsActive);
+public record AccountSummary(Guid Id, string Email, bool IsActive, bool IsEmailVerified, DateTime? EmailVerifiedAt);
+public record AccountLoginInfo(Guid Id, string Email, string PasswordHash, bool IsActive, bool IsEmailVerified, DateTime? EmailVerifiedAt);
 
 public interface IAccountRepository
 {

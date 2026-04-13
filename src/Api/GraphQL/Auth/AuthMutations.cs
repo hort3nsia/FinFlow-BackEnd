@@ -4,7 +4,10 @@ using FinFlow.Application.Auth.Commands.Login;
 using FinFlow.Application.Auth.Commands.Logout;
 using FinFlow.Application.Auth.Commands.RefreshToken;
 using FinFlow.Application.Auth.Commands.Register;
+using FinFlow.Application.Auth.Commands.ResendEmailVerification;
 using FinFlow.Application.Auth.Commands.SelectWorkspace;
+using FinFlow.Application.Auth.Commands.VerifyEmailByOtp;
+using FinFlow.Application.Auth.Commands.VerifyEmailByToken;
 using FinFlow.Application.Auth.DTOs.Requests;
 using FinFlow.Application.Auth.DTOs.Responses;
 using FinFlow.Application.Membership.Commands.AcceptInvite;
@@ -28,6 +31,7 @@ using DomainError = FinFlow.Domain.Abstractions.Error;
 using DomainResultOfAccountSession = FinFlow.Domain.Abstractions.Result<FinFlow.Application.Auth.DTOs.Responses.AccountSessionResponse>;
 using DomainResultOfAuthResponse = FinFlow.Domain.Abstractions.Result<FinFlow.Application.Auth.DTOs.Responses.AuthResponse>;
 using DomainResultOfRefreshSession = FinFlow.Domain.Abstractions.Result<FinFlow.Application.Auth.DTOs.Responses.RefreshSessionResponse>;
+using DomainResultOfRegistrationPending = FinFlow.Domain.Abstractions.Result<FinFlow.Application.Auth.DTOs.Responses.RegistrationPendingResponse>;
 
 namespace FinFlow.Api.GraphQL.Auth;
 
@@ -132,7 +136,7 @@ public class AuthMutations
         return HandleAccountSessionResult(result);
     }
 
-    public async Task<AccountSessionPayload> RegisterAsync(
+    public async Task<RegistrationPendingResponse> RegisterAsync(
         RegisterInput input,
         [Service] IMediator mediator,
         [Service] IHttpContextAccessor httpContextAccessor,
@@ -144,7 +148,7 @@ public class AuthMutations
         var result = await mediator.Send(
             new RegisterCommand(new RegisterRequest(input.Email, input.Password, input.Name, clientIp)),
             cancellationToken);
-        return HandleAccountSessionResult(result);
+        return HandleRegistrationPendingResult(result);
     }
 
     [Authorize]
@@ -279,6 +283,52 @@ public class AuthMutations
             new RefreshTokenCommand(new RefreshTokenRequest(input.RefreshToken)),
             cancellationToken);
         return HandleRefreshResult(result);
+    }
+
+    public async Task<bool> VerifyEmailByTokenAsync(
+        string token,
+        [Service] IMediator mediator,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new VerifyEmailByTokenCommand(new VerifyEmailByTokenRequest(token)),
+            cancellationToken);
+
+        if (result.IsFailure)
+            throw ToGraphQlException(result.Error);
+
+        return true;
+    }
+
+    public async Task<bool> VerifyEmailByOtpAsync(
+        string email,
+        string otp,
+        [Service] IMediator mediator,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new VerifyEmailByOtpCommand(new VerifyEmailByOtpRequest(email, otp)),
+            cancellationToken);
+
+        if (result.IsFailure)
+            throw ToGraphQlException(result.Error);
+
+        return true;
+    }
+
+    public async Task<ChallengeDispatchResponse> ResendEmailVerificationAsync(
+        string email,
+        [Service] IMediator mediator,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new ResendEmailVerificationCommand(new ResendEmailVerificationRequest(email)),
+            cancellationToken);
+
+        if (result.IsFailure)
+            throw ToGraphQlException(result.Error);
+
+        return result.Value;
     }
 
     [Authorize]
@@ -435,6 +485,14 @@ public class AuthMutations
             result.Value.Id,
             result.Value.Email,
             result.Value.SessionKind);
+    }
+
+    private static RegistrationPendingResponse HandleRegistrationPendingResult(DomainResultOfRegistrationPending result)
+    {
+        if (result.IsFailure)
+            throw ToGraphQlException(result.Error);
+
+        return result.Value;
     }
 
     private static WorkspaceSessionPayload HandleWorkspaceResult(FinFlow.Domain.Abstractions.Result<WorkspaceSessionResponse> result)
