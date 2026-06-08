@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using FinFlow.Application.Common.Abstractions;
 using FinFlow.Application.Documents.Ocr;
@@ -18,6 +19,8 @@ public sealed class OpenRouterOcrProvider : IOcrProvider
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly ResiliencePipeline<HttpResponseMessage> _retryPipeline;
     private readonly HttpClient _httpClient;
@@ -96,7 +99,20 @@ public sealed class OpenRouterOcrProvider : IOcrProvider
                 async ct => await _httpClient.PostAsJsonAsync(_chatCompletionsUri, request, SerializerOptions, ct),
                 cancellationToken);
 
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            var responseBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            string responseBody;
+            try
+            {
+                // Force strict UTF-8 instead of trusting the upstream charset header / replace-on-error
+                // decoding. A truncated or invalid multibyte sequence must fail loudly rather than
+                // decode into U+FFFD and silently persist mojibake downstream.
+                responseBody = StrictUtf8.GetString(responseBytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                _logger?.LogWarning("OpenRouter OCR response body was not valid UTF-8.");
+                return Result.Failure<OcrExtractionResult>(DocumentOcrErrors.OcrInvalidJson);
+            }
             if (!response.IsSuccessStatusCode)
             {
                 _logger?.LogWarning(
@@ -130,23 +146,7 @@ public sealed class OpenRouterOcrProvider : IOcrProvider
                 return parseResult;
             }
 
-            return Result.Success(OcrExtractionResult.Create(
-                parseResult.Value.VendorName,
-                parseResult.Value.Reference,
-                parseResult.Value.DocumentDate,
-                parseResult.Value.ExtractedInvoiceDueDate,
-                parseResult.Value.Category,
-                parseResult.Value.VendorTaxId,
-                parseResult.Value.Subtotal,
-                parseResult.Value.Vat,
-                parseResult.Value.TotalAmount,
-                parseResult.Value.Source,
-                parseResult.Value.ConfidenceLabel,
-                parseResult.Value.LineItems,
-                processedPageCount,
-                wasTruncated,
-                parseResult.Value.CurrencyCode,
-                parseResult.Value.TaxLines));
+            return Result.Success(LlmVisionSanityGuard.Apply(parseResult.Value, processedPageCount, wasTruncated));
         }
         catch (HttpRequestException)
         {

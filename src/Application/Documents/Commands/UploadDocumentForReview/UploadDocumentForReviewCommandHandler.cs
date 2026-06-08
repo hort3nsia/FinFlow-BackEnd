@@ -265,7 +265,10 @@ var draftResult = UploadedDocumentDraft.CreateSuggested(
             draft.ExchangeRate,
             draft.BaseCurrencyCode,
             decimal.Round(draft.TotalAmount * draft.ExchangeRate, 2, MidpointRounding.AwayFromZero),
-            quotaResult.Value.ApprovedUnitCount);
+            quotaResult.Value.ApprovedUnitCount,
+            // H2: surface OCR warnings (truncation, low confidence, unverified vision figures,
+            // reconciliation mismatch) to the reviewer instead of dropping them.
+            extracted.Warnings ?? []);
 
         return Result.Success(response);
     }

@@ -111,23 +111,7 @@ public sealed class GroqOcrProvider : IOcrProvider
             if (parseResult.IsFailure)
                 return parseResult;
 
-            return Result.Success(OcrExtractionResult.Create(
-                parseResult.Value.VendorName,
-                parseResult.Value.Reference,
-                parseResult.Value.DocumentDate,
-                parseResult.Value.ExtractedInvoiceDueDate,
-                parseResult.Value.Category,
-                parseResult.Value.VendorTaxId,
-                parseResult.Value.Subtotal,
-                parseResult.Value.Vat,
-                parseResult.Value.TotalAmount,
-                parseResult.Value.Source,
-                parseResult.Value.ConfidenceLabel,
-                parseResult.Value.LineItems,
-                processedPageCount,
-                wasTruncated,
-                parseResult.Value.CurrencyCode,
-                parseResult.Value.TaxLines));
+            return Result.Success(LlmVisionSanityGuard.Apply(parseResult.Value, processedPageCount, wasTruncated));
         }
         catch (HttpRequestException)
         {

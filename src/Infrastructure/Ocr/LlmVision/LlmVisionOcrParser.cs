@@ -22,9 +22,13 @@ public static class LlmVisionOcrParser
             var extractedInvoiceDueDate = GetOptionalDate(root, "extractedInvoiceDueDate");
             var category = DocumentTextNormalizer.NormalizeCategory(GetOptionalString(root, "category") ?? string.Empty);
             var vendorTaxId = NormalizeVendorTaxId(GetOptionalString(root, "vendorTaxId"));
-            var subtotal = GetRequiredDecimal(root, "subtotal");
-            var vat = GetRequiredDecimal(root, "vat");
-            var totalAmount = GetRequiredDecimal(root, "totalAmount");
+            // H6: the prompt explicitly allows null for figures the model cannot read, so a
+            // single unreadable amount must NOT throw away the whole document. Treat money
+            // fields as optional (default 0) — the verbatim verifier / reconciliation warnings
+            // downstream surface anything that doesn't add up, and the reviewer can fix it.
+            var subtotal = GetOptionalDecimal(root, "subtotal") ?? 0m;
+            var vat = GetOptionalDecimal(root, "vat") ?? 0m;
+            var totalAmount = GetOptionalDecimal(root, "totalAmount") ?? 0m;
             var currencyCode = NormalizeCurrencyCode(GetOptionalString(root, "currencyCode"));
             var taxLines = ParseTaxLines(root);
 
@@ -36,9 +40,9 @@ public static class LlmVisionOcrParser
             {
                 lineItems.Add(new OcrExtractionLineItem(
                     DocumentTextNormalizer.NormalizeLineItemName(GetRequiredString(item, "itemName")),
-                    GetRequiredDecimal(item, "quantity"),
-                    GetRequiredDecimal(item, "unitPrice"),
-                    GetRequiredDecimal(item, "total"),
+                    GetOptionalDecimal(item, "quantity") ?? 0m,
+                    GetOptionalDecimal(item, "unitPrice") ?? 0m,
+                    GetOptionalDecimal(item, "total") ?? 0m,
                     GetOptionalDecimal(item, "taxRate"),
                     GetOptionalDecimal(item, "taxableAmount") ?? 0m,
                     GetOptionalDecimal(item, "taxAmount") ?? 0m));

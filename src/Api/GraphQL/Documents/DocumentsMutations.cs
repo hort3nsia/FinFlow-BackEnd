@@ -194,7 +194,8 @@ public sealed record DocumentOcrDraftPayload(
     decimal ExchangeRate = 1m,
     string BaseCurrencyCode = "VND",
     decimal TotalAmountInBaseCurrency = 0m,
-    int? ProcessedPageCount = null);
+    int? ProcessedPageCount = null,
+    IReadOnlyList<string>? Warnings = null);
 
 public sealed record ReviewedDocumentPayload(
     Guid DocumentId,
@@ -574,7 +575,8 @@ public sealed class DocumentsMutations
             response.ExchangeRate,
             response.BaseCurrencyCode,
             response.TotalAmountInBaseCurrency,
-            response.ProcessedPageCount);
+            response.ProcessedPageCount,
+            response.Warnings ?? []);
 
     private static GraphQLException ToGraphQlException(DomainError error) =>
         new(new HotChocolate.Error(error.Description, error.Code));

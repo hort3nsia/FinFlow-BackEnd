@@ -132,6 +132,33 @@ public sealed class SubmitReviewedDocumentCommandHandlerTests
         Assert.Equal(0m, result.Value.TotalAmount);
     }
 
+    [Fact]
+    public async Task Handle_RejectsSubmit_WhenVendorNameContainsUnreadableCharacters()
+    {
+        var sut = BuildSut(out _, out _, out _);
+        var cmd = CreateCommand(sut.TenantId, sut.MembershipId) with { VendorName = "B�CH H�A XANH" };
+
+        var result = await sut.Handler.Handle(cmd, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ReviewedDocumentErrors.UnreadableCharacters, result.Error);
+    }
+
+    [Fact]
+    public async Task Handle_RejectsSubmit_WhenLineItemNameContainsUnreadableCharacters()
+    {
+        var sut = BuildSut(out _, out _, out _);
+        var cmd = CreateCommand(sut.TenantId, sut.MembershipId) with
+        {
+            LineItems = [new SubmitReviewedDocumentLineItem("Laptop b�g", 1m, 1500000m, 1500000m)]
+        };
+
+        var result = await sut.Handler.Handle(cmd, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ReviewedDocumentErrors.UnreadableCharacters, result.Error);
+    }
+
     private static (SubmitReviewedDocumentCommandHandler Handler, Guid TenantId, Guid MembershipId) BuildSut(
         out Mock<IReviewedDocumentChunkIndexer> indexerMock,
         out Mock<IVendorLinkResolver> resolverMock,

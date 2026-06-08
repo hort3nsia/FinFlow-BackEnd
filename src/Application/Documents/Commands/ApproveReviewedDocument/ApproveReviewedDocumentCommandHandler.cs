@@ -148,9 +148,13 @@ public sealed class ApproveReviewedDocumentCommandHandler
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(
+            // DB commit already succeeded; the document exists but has no vector
+            // chunks, so it is invisible to RAG until re-indexed. Logged at Error
+            // (not Warning) so this silent loss is alertable. Recovery path:
+            // ReindexReviewedDocumentsCommand (admin-triggered).
+            _logger.LogError(
                 ex,
-                "Reviewed document auto-index failed after approval for tenant {TenantId} document {DocumentId}",
+                "Reviewed document auto-index failed after approval for tenant {TenantId} document {DocumentId}; document is committed but absent from RAG until manual reindex.",
                 document.IdTenant,
                 document.Id);
         }

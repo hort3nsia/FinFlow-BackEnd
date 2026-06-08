@@ -13,6 +13,7 @@ public static class ReviewedDocumentErrors
     public static readonly Error DocumentIdRequired = new("ReviewedDocument.DocumentIdRequired", "Document id is required.");
     public static readonly Error FileNameRequired = new("ReviewedDocument.FileNameRequired", "Original file name is required.");
     public static readonly Error VendorNameRequired = new("ReviewedDocument.VendorNameRequired", "Vendor name is required.");
+    public static readonly Error UnreadableCharacters = new("ReviewedDocument.UnreadableCharacters", "Tên chứa ký tự không đọc được, vui lòng nhập lại.");
     public static readonly Error ReferenceRequired = new("ReviewedDocument.ReferenceRequired", "Reference is required.");
     public static readonly Error CategoryRequired = new("ReviewedDocument.CategoryRequired", "Expense category is required.");
     public static readonly Error ReviewedByRequired = new("ReviewedDocument.ReviewedByRequired", "Reviewed by staff is required.");

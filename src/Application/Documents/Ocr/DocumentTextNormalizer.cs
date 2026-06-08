@@ -73,9 +73,15 @@ public static partial class DocumentTextNormalizer
         return MultiWhitespaceRegex().Replace(value.Trim(), " ");
     }
 
+    // U+FFFD replacement char: an upstream decode already failed and the original
+    // byte is gone. The loss is unrecoverable, so callers must flag/reject rather
+    // than attempt a (lossy) repair.
+    public static bool ContainsUnrecoverableMojibake(string value) =>
+        !string.IsNullOrEmpty(value) && value.Contains('�');
+
     private static string TryRepairUtf8Mojibake(string value)
     {
-        if (string.IsNullOrWhiteSpace(value) || !LooksLikeUtf8Mojibake(value))
+        if (string.IsNullOrWhiteSpace(value) || ContainsUnrecoverableMojibake(value) || !LooksLikeUtf8Mojibake(value))
             return value;
 
         try

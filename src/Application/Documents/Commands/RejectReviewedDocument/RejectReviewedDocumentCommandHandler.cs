@@ -1,10 +1,12 @@
 using FinFlow.Application.Budgets.Services;
+using FinFlow.Application.Chat.Interfaces;
 using FinFlow.Application.Documents.DTOs.Responses;
 using FinFlow.Domain.Abstractions;
 using FinFlow.Domain.Documents;
 using FinFlow.Domain.Entities;
 using FinFlow.Domain.Enums;
 using MediatR;
+using Microsoft.Extensions.Logging;
 
 namespace FinFlow.Application.Documents.Commands.RejectReviewedDocument;
 
@@ -14,15 +16,21 @@ public sealed class RejectReviewedDocumentCommandHandler
     private readonly IReviewedDocumentRepository _reviewedDocumentRepository;
     private readonly IBudgetReservationService _budgetReservation;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IReviewedDocumentChunkIndexer _documentChunkIndexer;
+    private readonly ILogger<RejectReviewedDocumentCommandHandler> _logger;
 
     public RejectReviewedDocumentCommandHandler(
         IReviewedDocumentRepository reviewedDocumentRepository,
         IBudgetReservationService budgetReservation,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IReviewedDocumentChunkIndexer documentChunkIndexer,
+        ILogger<RejectReviewedDocumentCommandHandler> logger)
     {
         _reviewedDocumentRepository = reviewedDocumentRepository;
         _budgetReservation = budgetReservation;
         _unitOfWork = unitOfWork;
+        _documentChunkIndexer = documentChunkIndexer;
+        _logger = logger;
     }
 
     public async Task<Result<ReviewedDocumentResponse>> Handle(RejectReviewedDocumentCommand request, CancellationToken cancellationToken)
@@ -65,6 +73,23 @@ public sealed class RejectReviewedDocumentCommandHandler
 
         _reviewedDocumentRepository.Update(document);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Best-effort: drop vector chunks so a rejected document is no longer
+        // retrievable by RAG. Mirrors WithdrawReviewedDocumentCommandHandler.
+        // On failure the chunks remain stale until a manual reindex; logged at
+        // Error so it surfaces rather than silently leaving rejected data live.
+        try
+        {
+            await _documentChunkIndexer.RemoveAsync(document.Id, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Chunk removal failed after reject for tenant {TenantId} document {DocumentId}; rejected document may still be retrievable until manual reindex.",
+                document.IdTenant,
+                document.Id);
+        }
 
         return Result.Success(new ReviewedDocumentResponse(
             document.Id,

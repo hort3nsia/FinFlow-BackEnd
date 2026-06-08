@@ -22,6 +22,24 @@ public sealed class LlmVisionOcrParserTests
     }
 
     [Fact]
+    public void Parse_DoesNotFail_WhenMoneyFieldIsNull()
+    {
+        // H6: prompt allows null for unreadable figures. A null subtotal must not throw away
+        // the whole document — it should default to 0 and let downstream guards/reviewer fix it.
+        const string json =
+            """
+            {"vendorName":"Acme Cloud Ltd.","reference":"INV-2026-0042","documentDate":"2026-04-18","category":"Software & SaaS","subtotal":null,"vat":240.00,"totalAmount":1440.00,"lineItems":[{"itemName":"Cloud Compute Instance","quantity":1,"unitPrice":1200.00,"total":1200.00}]}
+            """;
+
+        var result = LlmVisionOcrParser.Parse(json, "groq");
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal(0m, result.Value.Subtotal);
+        Assert.Equal(240.00m, result.Value.Vat);
+        Assert.Equal(1440.00m, result.Value.TotalAmount);
+    }
+
+    [Fact]
     public void Parse_ReturnsResult_ForFencedJson()
     {
         const string json =
