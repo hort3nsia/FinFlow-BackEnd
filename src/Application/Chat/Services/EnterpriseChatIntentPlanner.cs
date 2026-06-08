@@ -35,6 +35,11 @@ public sealed class EnterpriseChatIntentPlanner : IChatIntentPlanner
         if (TryClassifySafety(request.Query, out var safetyClassification))
             return safetyClassification;
 
+        // Fast-path: metadata questions about the actor (workspace, role, department, email, prior turn)
+        // should bypass RAG/LLM and use the General path with actor context injected by PromptBuilder.
+        if (TryClassifyActorMetadata(request.Query, out var metadataClassification))
+            return metadataClassification;
+
         var deterministicClassification = _deterministicPlanner.TryClassify(request.Query);
         if (deterministicClassification is not null)
             return deterministicClassification;
@@ -98,6 +103,78 @@ public sealed class EnterpriseChatIntentPlanner : IChatIntentPlanner
         ex.Message.Contains("returned invalid", StringComparison.OrdinalIgnoreCase) ||
         ex.Message.Contains("returned an empty", StringComparison.OrdinalIgnoreCase);
 
+    private bool TryClassifyActorMetadata(string query, out ChatIntentClassification classification)
+    {
+        classification = default!;
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var normalized = _textNormalizer.Normalize(query);
+        var paddedQuery = $" {normalized} ";
+
+        // Conversation memory questions: "tôi vừa hỏi gì", "câu trước tôi hỏi gì", "what did I ask"
+        var memoryHints = new[]
+        {
+            "vua hoi gi",
+            "vua noi gi",
+            "cau truoc",
+            "cau hoi truoc",
+            "toi vua",
+            "what did i ask",
+            "what did i say",
+            "ban vua tra loi",
+            "ban da tra loi",
+            "lap lai cau truoc",
+            "lap lai con so",
+            "lap lai so",
+            "tom tat lai cau truoc"
+        };
+        if (memoryHints.Any(p => paddedQuery.Contains($" {p} ", StringComparison.Ordinal)))
+        {
+            classification = new ChatIntentClassification(
+                ChatExecutionMode.General,
+                "actor-metadata-conversation-memory",
+                ChatIntentFamily.SmallTalk,
+                ChatScopeConfidence.SafeInferred);
+            return true;
+        }
+
+        // Self-metadata questions: workspace name, role, my department, my email, my full name
+        var selfMetadataHints = new[]
+        {
+            "workspace cua toi",
+            "workspace cua minh",
+            "ten workspace",
+            "ten cong ty",
+            "vai tro cua toi",
+            "vai tro cua minh",
+            "vai tro nao",
+            "role cua toi",
+            "my role",
+            "my workspace",
+            "phong ban cua toi",
+            "phong ban cua minh",
+            "my department",
+            "email cua toi",
+            "ten cua toi",
+            "ho ten cua toi",
+            "toi la ai",
+            "who am i",
+            "tai khoan cua toi"
+        };
+        if (selfMetadataHints.Any(p => paddedQuery.Contains($" {p} ", StringComparison.Ordinal)))
+        {
+            classification = new ChatIntentClassification(
+                ChatExecutionMode.General,
+                "actor-metadata-self-info",
+                ChatIntentFamily.SmallTalk,
+                ChatScopeConfidence.SafeInferred);
+            return true;
+        }
+
+        return false;
+    }
+
     private bool TryClassifySafety(string query, out ChatIntentClassification classification)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -141,11 +218,31 @@ public sealed class EnterpriseChatIntentPlanner : IChatIntentPlanner
             return true;
         }
 
+        if (IsProgrammingRequest(normalized))
+        {
+            classification = new ChatIntentClassification(
+                ChatExecutionMode.General,
+                "programming-request-general",
+                ChatIntentFamily.Productivity,
+                ChatScopeConfidence.Ambiguous);
+            return true;
+        }
+
         if (IsEvidenceDocumentLookup(normalized))
         {
             classification = new ChatIntentClassification(
                 ChatExecutionMode.Rag,
                 "deterministic-evidence-document-lookup",
+                ChatIntentFamily.DocumentLookup,
+                ChatScopeConfidence.SafeInferred);
+            return true;
+        }
+
+        if (IsSpecificVendorLookup(query, normalized))
+        {
+            classification = new ChatIntentClassification(
+                ChatExecutionMode.Rag,
+                "deterministic-specific-vendor-lookup",
                 ChatIntentFamily.DocumentLookup,
                 ChatScopeConfidence.SafeInferred);
             return true;
@@ -200,6 +297,40 @@ public sealed class EnterpriseChatIntentPlanner : IChatIntentPlanner
                 "huong dan he thong",
                 "prompt he thong"
             ]);
+    }
+
+    private static bool IsSpecificVendorLookup(string rawQuery, string normalizedQuery)
+    {
+        // Detect questions about a SPECIFIC named vendor / merchant / invoice,
+        // e.g. 'hoá đơn của nhà cung cấp "X" trị giá bao nhiêu?'. These must go to
+        // RAG (document lookup) so the answer is grounded — and correctly reports
+        // "not found" for a vendor that does not exist — instead of falling through
+        // to the aggregate tenant summary.
+        var paddedQuery = $" {normalizedQuery} ";
+        var mentionsVendor = ContainsAnyPadded(paddedQuery,
+            ["nha cung cap", "vendor", "merchant", "nha cc", "ncc"]);
+        if (!mentionsVendor)
+            return false;
+
+        // Ranking/aggregate phrasing ("nhà cung cấp NÀO chi NHIỀU NHẤT", "top vendor",
+        // "xếp hạng nhà cung cấp") is a vendor RANKING report, not a specific-vendor
+        // lookup. Let it fall through to the deterministic vendor-ranking reporting
+        // rule instead of forcing RAG (which can only see a handful of chunks).
+        var mentionsRanking = ContainsAnyPadded(paddedQuery,
+            ["nao", "top", "nhieu nhat", "chi nhieu", "cao nhat", "lon nhat", "xep hang",
+             "ranking", "dong gop nhieu", "chiem nhieu", "which", "most"]);
+        if (mentionsRanking)
+            return false;
+
+        // A specific vendor reference usually carries a proper-noun token (quoted text,
+        // capitalized word, or an embedded digit code like "Corp 9999").
+        var hasQuotedName = rawQuery.Contains('"') || rawQuery.Contains('\u201C') || rawQuery.Contains('\u201D');
+        var hasCapitalizedToken = rawQuery
+            .Split(new[] { ' ', '\t', '\n', '"', '\u201C', '\u201D' }, StringSplitOptions.RemoveEmptyEntries)
+            .Any(token => token.Length >= 2 && char.IsUpper(token[0]) && token.Skip(1).Any(char.IsLetterOrDigit));
+        var hasDigitCode = rawQuery.Any(char.IsDigit);
+
+        return hasQuotedName || hasCapitalizedToken || hasDigitCode;
     }
 
     private static bool IsEvidenceDocumentLookup(string normalizedQuery)
@@ -260,6 +391,19 @@ public sealed class EnterpriseChatIntentPlanner : IChatIntentPlanner
 
     private static bool ContainsAnyPadded(string paddedQuery, IReadOnlyList<string> phrases) =>
         phrases.Any(phrase => paddedQuery.Contains($" {phrase} ", StringComparison.Ordinal));
+
+    private static bool IsProgrammingRequest(string normalizedQuery)
+    {
+        var paddedQuery = $" {normalizedQuery} ";
+        var programmingTerms = new[]
+        {
+            "code", "python", "javascript", "java", "c#", "csharp", "sql", "script",
+            "ham", "function", "thuat toan", "algorithm", "lap trinh", "doan code",
+            "vong lap", "regex", "html", "css", "react", "angular", "query sql",
+            "giai thua", "factorial", "fibonacci", "compile", "debug code"
+        };
+        return programmingTerms.Any(term => paddedQuery.Contains($" {term} ", StringComparison.Ordinal));
+    }
 
     private static bool IsDestructiveOperationRequest(string normalizedQuery)
     {

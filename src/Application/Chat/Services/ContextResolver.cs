@@ -29,6 +29,20 @@ public sealed class ContextResolver : IContextResolver
     private static readonly string[] OwnReferenceWords =
         ["tôi", "của tôi", "em", "của em", "minh", "của minh", "của mình"];
 
+    // Anaphoric pronouns that refer back to a previously mentioned entity. Normalized
+    // (diacritics stripped, lowercased) to match IntentTextNormalizer output. We resolve
+    // these to the most-recently-referenced tracked entity of ANY type — not hardcoded to
+    // any single category — e.g. "ngày của nó", "trạng thái cái đó", "chứng từ đó duyệt chưa".
+    private static readonly string[] AnaphoricPronouns =
+        ["no", "cai do", "cai nay", "cai kia", "chung tu do", "hoa don do", "khoan do",
+         "khoan nay", "phieu do", "don do", "thang do", "vu do"];
+
+    // Standalone single-token pronouns. Only "no"/"kia" are safe as bare tokens; "do" and
+    // "nay" are excluded here because they appear in ordinary time phrases ("thang nay",
+    // "hom do") and would cause false anaphora. Those are matched only in multi-word forms
+    // above (e.g. "cai do", "khoan nay", "chung tu do").
+    private static readonly string[] StandalonePronounTokens = ["no", "kia"];
+
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "và", "thì", "có", "không", "theo", "với", "cho", "để", "của", "trong",
@@ -130,7 +144,19 @@ public sealed class ContextResolver : IContextResolver
         var resolvedQueryBuilder = new StringBuilder(query);
         foreach (var resolution in resolutions)
         {
-            ReplaceOrdinalIgnoreCase(resolvedQueryBuilder, resolution.Original, resolution.Resolved);
+            // Anaphora resolutions append the concrete entity name (the pronoun in the raw,
+            // accented query may not literally match the normalized pronoun token, so an
+            // in-place replace is unreliable). Appending keeps the entity in the retrieval
+            // query regardless. Other resolutions (e.g. department-token) replace in place.
+            if (resolution.Source.StartsWith("context_anaphora", StringComparison.Ordinal))
+            {
+                if (resolvedQueryBuilder.ToString().IndexOf(resolution.Resolved, StringComparison.OrdinalIgnoreCase) < 0)
+                    resolvedQueryBuilder.Append(' ').Append(resolution.Resolved);
+            }
+            else
+            {
+                ReplaceOrdinalIgnoreCase(resolvedQueryBuilder, resolution.Original, resolution.Resolved);
+            }
         }
         var resolvedQuery = resolvedQueryBuilder.ToString();
 
@@ -325,7 +351,23 @@ public sealed class ContextResolver : IContextResolver
                normalizedQuery.Contains(" thi sao", StringComparison.Ordinal) ||
                normalizedQuery.Contains("so sanh", StringComparison.Ordinal) ||
                normalizedQuery.Contains("hon", StringComparison.Ordinal) ||
-               normalizedQuery.Contains("kem", StringComparison.Ordinal);
+               normalizedQuery.Contains("kem", StringComparison.Ordinal) ||
+               ContainsAnaphoricPronoun(normalizedQuery);
+    }
+
+    /// <summary>
+    /// True when the (normalized) query contains an anaphoric pronoun referring back to a
+    /// previously mentioned entity ("nó", "cái đó", "chứng từ đó", standalone "đó"/"kia"...).
+    /// </summary>
+    private static bool ContainsAnaphoricPronoun(string normalizedQuery)
+    {
+        foreach (var phrase in AnaphoricPronouns)
+            if (ContainsWholeToken(normalizedQuery, phrase))
+                return true;
+        foreach (var token in StandalonePronounTokens)
+            if (ContainsWholeToken(normalizedQuery, token))
+                return true;
+        return false;
     }
 
     private static IReadOnlyList<EntityResolution> ResolveReferencesFromContext(
@@ -333,6 +375,34 @@ public sealed class ContextResolver : IContextResolver
         ConversationContext context)
     {
         var resolutions = new List<EntityResolution>();
+
+        // (1) Anaphora: if the query contains a pronoun ("nó", "cái đó", "chứng từ đó",
+        // standalone "đó"/"kia"...), resolve it to the MOST RECENTLY referenced tracked
+        // entity — of ANY type (vendor, document, expense, department, person, ...). This is
+        // intentionally type-agnostic so it generalizes beyond any single category.
+        var pronoun = FindAnaphoricPronoun(normalizedQuery);
+        if (pronoun is not null)
+        {
+            var recent = context.GetActiveEntities()
+                .OrderByDescending(e => e.LastReferenceTurn)
+                .ThenByDescending(e => e.MentionCount)
+                .ThenByDescending(e => e.LastAccessedAt)
+                .FirstOrDefault();
+
+            if (recent is not null && !string.IsNullOrWhiteSpace(recent.CanonicalName))
+            {
+                resolutions.Add(new EntityResolution
+                {
+                    Original = pronoun,
+                    Resolved = recent.CanonicalName,
+                    Source = $"context_anaphora_{recent.Type.ToString().ToLowerInvariant()}",
+                    Confidence = 0.8f
+                });
+            }
+        }
+
+        // (2) Department-token overlap (existing behavior): map a bare department token in
+        // the query back to its canonical department name.
         foreach (var entity in context.GetActiveEntities())
         {
             if (entity.Type != EntityType.DEPARTMENT)
@@ -362,6 +432,25 @@ public sealed class ContextResolver : IContextResolver
         }
 
         return resolutions;
+    }
+
+    /// <summary>
+    /// Returns the longest anaphoric pronoun phrase present in the normalized query (so
+    /// "chứng từ đó" is preferred over the bare "đó"), or null if none.
+    /// </summary>
+    private static string? FindAnaphoricPronoun(string normalizedQuery)
+    {
+        string? best = null;
+        foreach (var phrase in AnaphoricPronouns)
+            if (ContainsWholeToken(normalizedQuery, phrase) && (best is null || phrase.Length > best.Length))
+                best = phrase;
+        if (best is not null)
+            return best;
+
+        foreach (var token in StandalonePronounTokens)
+            if (ContainsWholeToken(normalizedQuery, token))
+                return token;
+        return null;
     }
 
     private static bool ContainsWholeToken(string normalizedQuery, string token)

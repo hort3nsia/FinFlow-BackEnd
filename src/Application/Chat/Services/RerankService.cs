@@ -4,21 +4,35 @@ using FinFlow.Domain.Documents;
 namespace FinFlow.Application.Chat.Services;
 
 /// <summary>
-/// Reranks retrieved document chunks using BM25 (Okapi BM25) — the industry-standard
-/// text relevance algorithm used by Lucene/Elasticsearch. Significantly more accurate
-/// than naive keyword overlap because it accounts for:
-///   - Term frequency saturation (k1) — diminishing returns for repeated matches
-///   - Document length normalization (b) — shorter chunks aren't penalized
-///   - Inverse document frequency (idf) — rare terms weight more than common ones
+/// Reranks retrieved document chunks by fusing the incoming hybrid-retrieval order
+/// (Reciprocal Rank Fusion of vector + keyword search) with a BM25 lexical re-score.
 ///
-/// For production-grade RAG, consider replacing with a cross-encoder reranker (e.g.,
-/// Cohere Rerank API, BGE-Reranker). BM25 is a strong deterministic baseline.
+/// IMPORTANT (H4 fix): the input list arrives already ordered by RRF, which encodes
+/// the *semantic* recall of the vector branch. Earlier this stage let BM25 — a pure
+/// surface-term-overlap score — decide the final top-N on its own. That silently
+/// discarded chunks the vector branch surfaced via meaning when the user's query was
+/// a paraphrase/synonym with little lexical overlap (BM25 ≈ 0), defeating the entire
+/// point of hybrid retrieval. To prevent that, BM25 is now only a *secondary* signal:
+/// we fuse the BM25 ranking with the original RRF ranking (again via reciprocal rank
+/// fusion), so a chunk ranked highly by retrieval cannot be dropped purely because it
+/// shares few words with the query.
+///
+/// BM25 (Okapi BM25) is still the industry-standard lexical relevance algorithm
+/// (Lucene/Elasticsearch) and accounts for term-frequency saturation (k1), document
+/// length normalization (b), and inverse document frequency (idf).
+///
+/// For production-grade RAG, consider replacing the BM25 leg with a cross-encoder
+/// reranker (e.g., Cohere Rerank API, BGE-Reranker) which preserves semantics directly.
 /// </summary>
 public sealed class RerankService : IRerankService
 {
     // BM25 parameters — standard Lucene defaults.
     private const float K1 = 1.5f;
     private const float B = 0.75f;
+
+    // RRF constant for fusing the retrieval rank with the BM25 rank. 60 is the
+    // canonical value (Cormack 2009), matching ReciprocalRankFusion used upstream.
+    private const double RrfConstant = 60.0;
 
     private static readonly char[] WordSeparators = [' ', '\t', '\n', '\r', '.', ',', '!', '?', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\''];
 
@@ -59,9 +73,32 @@ public sealed class RerankService : IRerankService
             idf[term] = Math.Log(((totalDocs - df + 0.5) / (df + 0.5)) + 1.0);
         }
 
-        // Score each chunk.
-        var results = tokenizedChunks
-            .Select(t => (Chunk: t.Chunk, Score: ComputeBm25Score(queryTerms, t.Terms, idf, avgDocLength)))
+        // BM25 score per chunk, preserving the incoming (RRF) order via index.
+        var bm25Scored = tokenizedChunks
+            .Select((t, retrievalRank) => (
+                t.Chunk,
+                RetrievalRank: retrievalRank,
+                Bm25: ComputeBm25Score(queryTerms, t.Terms, idf, avgDocLength)))
+            .ToList();
+
+        // Rank by BM25 (1-indexed). Chunks with no lexical overlap share the worst rank.
+        var bm25Order = bm25Scored
+            .OrderByDescending(x => x.Bm25)
+            .ToList();
+        var bm25RankById = new Dictionary<Guid, int>();
+        for (int i = 0; i < bm25Order.Count; i++)
+            bm25RankById[bm25Order[i].Chunk.Id] = i;
+
+        // Fuse retrieval rank (semantic, primary) with BM25 rank (lexical, secondary)
+        // via reciprocal rank fusion. A chunk highly ranked by hybrid retrieval keeps a
+        // strong score even when BM25 is ~0, so paraphrase answers survive the top-N cut.
+        var results = bm25Scored
+            .Select(x =>
+            {
+                var rrf = (1.0 / (RrfConstant + x.RetrievalRank + 1))
+                          + (1.0 / (RrfConstant + bm25RankById[x.Chunk.Id] + 1));
+                return (x.Chunk, Score: rrf);
+            })
             .OrderByDescending(x => x.Score)
             .Take(topN)
             .ToList();

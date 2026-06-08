@@ -39,7 +39,15 @@ internal sealed class ReviewedDocumentRepository : IReviewedDocumentRepository
         await _dbContext.Set<ReviewedDocument>()
             .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(x => x.IdTenant == tenantId && x.IsActive)
+            // Used for manual reindex into the vector store. Exclude Rejected and
+            // Draft so reindex doesn't re-create chunks for documents that should
+            // not be retrievable by RAG (Reject/Withdraw remove their chunks; a
+            // blanket reindex would otherwise resurrect them). Draft covers the
+            // withdrawn case since Withdraw reverts status to Draft.
+            .Where(x => x.IdTenant == tenantId
+                && x.IsActive
+                && x.Status != ReviewedDocumentStatus.Rejected
+                && x.Status != ReviewedDocumentStatus.Draft)
             .OrderByDescending(x => x.SubmittedAt)
             .ToListAsync(cancellationToken);
 

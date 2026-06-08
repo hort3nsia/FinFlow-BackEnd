@@ -1762,6 +1762,11 @@ public sealed class ChatService : IChatService
                 retrievalQuery = ChatPromptSanitizer.Sanitize(rewritten);
         }
 
+        // Expand Vietnamese slang into formal synonyms so colloquial queries (e.g. "đốt tiền",
+        // "bên grab", "xèng") match formal document chunks. Appends synonyms, never removes the
+        // original terms, so an already-correct query is unaffected.
+        retrievalQuery = VietnameseSlangNormalizer.Expand(retrievalQuery);
+
         var queryEmbedding = await _embeddingService.EmbedAsync(retrievalQuery, ct);
         if (queryEmbedding == null || queryEmbedding.Length == 0)
             throw new InvalidOperationException("Failed to generate embedding for query.");
@@ -1792,7 +1797,11 @@ public sealed class ChatService : IChatService
 
         EnsureChunksWithinScope(searchChunks, request, accessScope, effectiveDepartmentId, ownerFilter);
 
-        var rerankedResults = await _rerankService.RerankAsync(request.Query, searchChunks, 5, ct);
+        // Rerank with retrievalQuery (the rewritten query) so the rerank stage scores
+        // chunks against the same text used for retrieval. Using request.Query here would
+        // mis-score chunks once a query rewriter is enabled in prod (retrieval finds a
+        // chunk via the rewritten terms, but rerank judges it against the original query).
+        var rerankedResults = await _rerankService.RerankAsync(retrievalQuery, searchChunks, 5, ct);
         var topChunks = rerankedResults.Select(r => r.Chunk).ToList();
         EnsureChunksWithinScope(topChunks, request, accessScope, effectiveDepartmentId, ownerFilter);
 

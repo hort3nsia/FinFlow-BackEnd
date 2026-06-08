@@ -25,14 +25,16 @@ internal static class ChatRagBusinessFormatter
         if (intent == RagBusinessFormatIntent.None && reportingTask != ChatReportingTask.EntityStatusLookup)
             return null;
 
+        // topChunks arrives pre-ordered by rerank relevance (most relevant first). GroupBy preserves
+        // first-appearance order, so documents stays in relevance order. Do NOT re-sort by date here:
+        // Detail/SupplierLookup/StatusLookup pick the first/representative document and must answer
+        // about the most relevant one, not the most recently submitted. Only the Recent intent, which
+        // explicitly asks for newest items, sorts by date (below).
         var documents = chunks
             .Where(static chunk => chunk.Type is DocumentChunkType.Expense or DocumentChunkType.Receipt or DocumentChunkType.LineItem)
             .GroupBy(static chunk => chunk.DocumentId)
             .Select(ParseDocumentGroup)
             .Where(static document => document.HasBusinessContent)
-            .OrderByDescending(static document => document.SubmittedAtUtc)
-            .ThenByDescending(static document => document.DocumentDate)
-            .ThenByDescending(static document => document.TotalAmount)
             .ToList();
 
         if (documents.Count == 0)
@@ -45,7 +47,14 @@ internal static class ChatRagBusinessFormatter
             return BuildSupplierLookupResult(documents);
 
         if (intent == RagBusinessFormatIntent.Recent)
-            documents = documents.Take(MaxRecentItems).ToList();
+        {
+            documents = documents
+                .OrderByDescending(static document => document.SubmittedAtUtc)
+                .ThenByDescending(static document => document.DocumentDate)
+                .ThenByDescending(static document => document.TotalAmount)
+                .Take(MaxRecentItems)
+                .ToList();
+        }
 
         if (intent == RagBusinessFormatIntent.Detail)
             documents = documents.Take(1).ToList();

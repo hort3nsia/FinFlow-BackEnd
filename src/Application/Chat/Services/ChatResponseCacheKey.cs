@@ -40,8 +40,9 @@ public static class ChatResponseCacheKey
         var typesStr = string.Join(",", allowedTypes.OrderBy(t => t.ToString(), StringComparer.Ordinal).Select(t => t.ToString()));
         var normalized = NormalizeQueryStructure(query);
         var wordCount = GetWordCount(query);
-        // Include membershipId to prevent cross-user cache poisoning
-        // Include normalized query structure + word count to prevent collision from semantically different queries
+        // Include membershipId to prevent cross-user cache poisoning.
+        // normalized = SHA256 of the full normalized query so semantically different
+        // queries never collide; wordCount kept as an additional cheap discriminator.
         var keyInput = $"{promptVersion}|{membershipId}|{role}|{departmentId}|{ownerFilter}|{typesStr}|{wordCount}|{normalized}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(keyInput));
         var hex = Convert.ToHexString(hash);
@@ -49,18 +50,17 @@ public static class ChatResponseCacheKey
     }
 
     /// <summary>
-    /// Normalize query by stripping content words but preserving structural pattern.
-    /// This prevents "show expenses" and "show expenses this month" from colliding.
+    /// Normalize the query by lowercasing, trimming, and collapsing whitespace while
+    /// preserving every token, then hashing the result. Distinct queries never share a
+    /// key; queries differing only in case/whitespace still hit the same cache entry.
     /// </summary>
     private static string NormalizeQueryStructure(string query)
     {
-        var trimmed = query.Trim().ToLowerInvariant();
-        var words = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0) return string.Empty;
-        // Keep first and last word as anchors, mark middle section size
-        if (words.Length == 1) return words[0];
-        if (words.Length == 2) return $"{words[0]}|_|{words[1]}";
-        return $"{words[0]}|{words.Length - 2} words|{words[^1]}";
+        var words = query.Trim().ToLowerInvariant().Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var normalized = string.Join(' ', words);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexString(hash);
     }
 
     private static int GetWordCount(string query)

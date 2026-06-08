@@ -250,6 +250,35 @@ await using (var scope = app.Services.CreateAsyncScope())
     }
 }
 
+// Maintenance CLI: `dotnet run -- reindex-chunks <tenantId>` rebuilds chunk CONTENT
+// (re-runs the indexer so chunks pick up content-format changes) then re-embeds. Use after
+// changing chunk layout in ReviewedDocumentChunkIndexer. Exits without serving.
+if (args.Contains("reindex-chunks", StringComparer.OrdinalIgnoreCase))
+{
+    var tenantArg = args.SkipWhile(a => !string.Equals(a, "reindex-chunks", StringComparison.OrdinalIgnoreCase))
+        .Skip(1).FirstOrDefault();
+    if (!Guid.TryParse(tenantArg, out var tenantId))
+    {
+        Console.WriteLine("[reindex-chunks] Usage: reindex-chunks <tenantId-guid>");
+        return;
+    }
+
+    await using var scope = app.Services.CreateAsyncScope();
+    var tenantWriter = scope.ServiceProvider.GetService<FinFlow.Domain.Interfaces.ICurrentTenantWriter>();
+    tenantWriter?.SetFromRequest(tenantId, null, isSuperAdmin: true);
+    var repo = scope.ServiceProvider.GetRequiredService<FinFlow.Domain.Documents.IReviewedDocumentRepository>();
+    var indexer = scope.ServiceProvider.GetRequiredService<FinFlow.Application.Chat.Interfaces.IReviewedDocumentChunkIndexer>();
+    var docs = await repo.GetAllActiveByTenantAsync(tenantId, CancellationToken.None);
+    var total = 0; var failed = 0;
+    foreach (var d in docs)
+    {
+        try { total += await indexer.ReindexAsync(d, CancellationToken.None); }
+        catch (Exception ex) { failed++; Console.WriteLine($"  reindex failed {d.Id}: {ex.Message}"); }
+    }
+    Console.WriteLine($"[reindex-chunks] tenant {tenantId}: {docs.Count} docs, {total} chunks rebuilt, {failed} failed.");
+    return;
+}
+
 // Maintenance CLI: `dotnet run -- reembed-chunks [batchSize]` regenerates all
 // DocumentChunk embeddings with the current provider, then exits without serving.
 if (args.Contains("reembed-chunks", StringComparer.OrdinalIgnoreCase))
@@ -296,6 +325,21 @@ if (args.Contains("eval-intents", StringComparer.OrdinalIgnoreCase))
     var harness = scope.ServiceProvider.GetRequiredService<FinFlow.Infrastructure.Chat.IntentEvalHarness>();
     var embeddingOnly = rest.Contains("--embedding-only", StringComparer.OrdinalIgnoreCase);
     var code = await harness.RunAsync(casesDir, outFile, CancellationToken.None, embeddingOnly);
+    return;
+}
+
+// Offline RAG retrieval eval CLI: `dotnet run -- eval-rag [goldenPath] [outFile]` runs the real
+// retrieval stack (embed + pgvector + keyword + RRF + rerank) against a golden set and prints
+// Recall@K / MRR / hit-rate. Does NOT call the answer-gen LLM, so it never hits the rate limiter.
+if (args.Contains("eval-rag", StringComparer.OrdinalIgnoreCase))
+{
+    var rest = args.SkipWhile(a => !string.Equals(a, "eval-rag", StringComparison.OrdinalIgnoreCase)).Skip(1).ToArray();
+    var goldenPath = rest.ElementAtOrDefault(0) ?? "docs/rag-hardening/rag-golden-set.json";
+    var outFile = rest.ElementAtOrDefault(1);
+
+    await using var scope = app.Services.CreateAsyncScope();
+    var harness = scope.ServiceProvider.GetRequiredService<FinFlow.Infrastructure.Chat.RagEvalHarness>();
+    var code = await harness.RunAsync(goldenPath, outFile, CancellationToken.None);
     return;
 }
 

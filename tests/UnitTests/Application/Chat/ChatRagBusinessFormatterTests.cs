@@ -243,4 +243,110 @@ public class ChatRagBusinessFormatterTests
         Assert.Single(result.Citations);
         Assert.Equal(1, result.DocumentCount);
     }
+
+    // The chunk that rerank ranked most relevant is FIRST in topChunks but has an OLDER
+    // SubmittedAtUtc. A separate, less-relevant document is newer. The formatter must answer
+    // about the relevant (first) document, not the newest one.
+    private static DocumentChunk RelevantButOlderChunk(Guid tenantId, Guid membershipId) =>
+        DocumentChunk.Create(
+            tenantId,
+            membershipId,
+            Guid.NewGuid(),
+            null,
+            """
+            Expense record
+            Merchant: Relevant Vendor
+            Reference: RELEVANT-001
+            Expense date: 2021-01-10
+            Total: 111000
+            Status: Approved
+            Submitted at UTC: 2021-01-10T09:00:00Z
+            """,
+            "hash-relevant-older",
+            0,
+            [0.1f, 0.2f],
+            DocumentChunkType.Expense);
+
+    private static DocumentChunk IrrelevantButNewerChunk(Guid tenantId, Guid membershipId) =>
+        DocumentChunk.Create(
+            tenantId,
+            membershipId,
+            Guid.NewGuid(),
+            null,
+            """
+            Expense record
+            Merchant: Newer Vendor
+            Reference: NEWER-999
+            Expense date: 2026-05-30
+            Total: 999000
+            Status: ReadyForApproval
+            Submitted at UTC: 2026-05-30T09:00:00Z
+            """,
+            "hash-irrelevant-newer",
+            1,
+            [0.1f, 0.2f],
+            DocumentChunkType.Expense);
+
+    [Fact]
+    public void TryFormat_Detail_PrefersRerankRelevantChunk_NotNewestSubmitted()
+    {
+        var tenantId = Guid.NewGuid();
+        var membershipId = Guid.NewGuid();
+
+        var relevant = RelevantButOlderChunk(tenantId, membershipId);
+        var newer = IrrelevantButNewerChunk(tenantId, membershipId);
+
+        // topChunks already reranked: relevant chunk first.
+        var result = ChatRagBusinessFormatter.TryFormat(
+            "chi tiết chứng từ này",
+            [relevant, newer]);
+
+        Assert.NotNull(result);
+        Assert.Contains("Relevant Vendor", result!.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("RELEVANT-001", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Newer Vendor", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("NEWER-999", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, result.DocumentCount);
+    }
+
+    [Fact]
+    public void TryFormat_SupplierLookup_PrefersRerankRelevantChunk_NotNewestSubmitted()
+    {
+        var tenantId = Guid.NewGuid();
+        var membershipId = Guid.NewGuid();
+
+        var relevant = RelevantButOlderChunk(tenantId, membershipId);
+        var newer = IrrelevantButNewerChunk(tenantId, membershipId);
+
+        var result = ChatRagBusinessFormatter.TryFormat(
+            "Chứng từ này thuộc nhà cung cấp nào?",
+            [relevant, newer]);
+
+        Assert.NotNull(result);
+        Assert.Contains("Relevant Vendor", result!.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Newer Vendor", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, result.DocumentCount);
+    }
+
+    [Fact]
+    public void TryFormat_StatusLookup_PrefersRerankRelevantChunk_NotNewestSubmitted()
+    {
+        var tenantId = Guid.NewGuid();
+        var membershipId = Guid.NewGuid();
+
+        var relevant = RelevantButOlderChunk(tenantId, membershipId);
+        var newer = IrrelevantButNewerChunk(tenantId, membershipId);
+
+        var result = ChatRagBusinessFormatter.TryFormat(
+            "Khoản đó đã được duyệt chưa?",
+            [relevant, newer],
+            ChatReportingTask.EntityStatusLookup);
+
+        Assert.NotNull(result);
+        // Relevant doc is Approved; newer doc is ReadyForApproval (Chờ duyệt).
+        Assert.Contains("Relevant Vendor", result!.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Đã duyệt", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Newer Vendor", result.Answer, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, result.DocumentCount);
+    }
 }

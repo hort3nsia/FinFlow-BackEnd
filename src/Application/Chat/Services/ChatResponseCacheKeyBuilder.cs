@@ -47,12 +47,15 @@ public sealed class ChatResponseCacheKeyBuilder : IChatResponseCacheKeyBuilder
 
     private static string NormalizeQueryStructure(string query)
     {
-        var trimmed = query.Trim().ToLowerInvariant();
-        var words = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0) return string.Empty;
-        if (words.Length == 1) return words[0];
-        if (words.Length == 2) return $"{words[0]}|_|{words[1]}";
-        return $"{words[0]}|{words.Length - 2} words|{words[^1]}";
+        // Hash the FULL normalized query (lowercase, trimmed, whitespace-collapsed,
+        // all tokens preserved) so that distinct queries never share a cache key,
+        // while queries differing only in case/whitespace still hit the same entry.
+        var words = query.Trim().ToLowerInvariant().Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var normalized = string.Join(' ', words);
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexString(hash);
     }
 
     private static int GetWordCount(string query)

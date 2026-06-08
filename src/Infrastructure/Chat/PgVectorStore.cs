@@ -108,18 +108,6 @@ public class PgVectorStore : IVectorStore
             ? allowedTypes.Select(x => x.ToString()).ToArray()
             : null;
 
-        var sql = """
-            SELECT c."Id" AS "Value"
-            FROM document_chunks AS c
-            WHERE c."IdTenant" = @tenantId
-              AND (@departmentId IS NULL OR c."DepartmentId" = @departmentId)
-              AND (@ownerId IS NULL OR c."OwnerMembershipId" = @ownerId)
-              AND (@allowedTypes IS NULL OR c."Type" = ANY(@allowedTypes))
-              AND to_tsvector('simple', c."Content") @@ plainto_tsquery('simple', @query)
-            ORDER BY ts_rank_cd(to_tsvector('simple', c."Content"), plainto_tsquery('simple', @query)) DESC
-            LIMIT @topK
-            """;
-
         var parameters = new List<NpgsqlParameter>
         {
             new("tenantId", NpgsqlDbType.Uuid) { Value = tenantId },
@@ -129,6 +117,30 @@ public class PgVectorStore : IVectorStore
             new("query", NpgsqlDbType.Text) { Value = query },
             new("topK", NpgsqlDbType.Integer) { Value = topK }
         };
+
+        // Amount-lookup: neural embeddings and tsvector tokenization both fail to surface a
+        // chunk by a specific number (e.g. "1.661.000"). Fold a literal digit-string LIKE into
+        // the keyword path so exact-amount queries match the chunk that contains them. Chunks
+        // matched only by amount are ranked after tsquery hits (ts_rank_cd = 0 for them).
+        var amountTokens = AmountQueryParser.ExtractAmountTokens(query);
+        var amountPredicate = AmountContentMatchBuilder.Build(amountTokens, parameters);
+
+        var textMatch = "to_tsvector('simple', c.\"Content\") @@ plainto_tsquery('simple', @query)";
+        var matchPredicate = amountPredicate is null
+            ? textMatch
+            : $"({textMatch} OR {amountPredicate})";
+
+        var sql = $"""
+            SELECT c."Id" AS "Value"
+            FROM document_chunks AS c
+            WHERE c."IdTenant" = @tenantId
+              AND (@departmentId IS NULL OR c."DepartmentId" = @departmentId)
+              AND (@ownerId IS NULL OR c."OwnerMembershipId" = @ownerId)
+              AND (@allowedTypes IS NULL OR c."Type" = ANY(@allowedTypes))
+              AND {matchPredicate}
+            ORDER BY ts_rank_cd(to_tsvector('simple', c."Content"), plainto_tsquery('simple', @query)) DESC
+            LIMIT @topK
+            """;
 
         var orderedIds = await _dbContext.Database
             .SqlQueryRaw<Guid>(sql, parameters.Cast<object>().ToArray())
