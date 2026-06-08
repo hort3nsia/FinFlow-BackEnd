@@ -17,6 +17,8 @@ public interface IVectorStore
     /// <summary>
     /// PostgreSQL full-text-search on chunk content (tsvector).
     /// Used as keyword half of hybrid retrieval; results are fused with vector search.
+    /// Also matches literal monetary-amount digit strings (e.g. "1661000") via LIKE,
+    /// since neural embeddings cannot distinguish specific numbers.
     /// </summary>
     Task<IReadOnlyList<DocumentChunk>> KeywordSearchAsync(
         string query,

@@ -36,6 +36,22 @@ internal sealed class DeterministicReportingTaskPlanner
                 "cho duyet", "dang cho duyet", "ready for approval", "approval queue",
                 "pending approval", "can duyet", "waiting approval"
             ]),
+        // Budget utilization questions: "phòng nào vượt ngân sách", "ngân sách còn
+        // lại bao nhiêu", "mức sử dụng ngân sách", "hạn mức tháng này". Routes to the
+        // BudgetUtilization reporting task which reads the budgets table directly.
+        // Without this rule budget questions fall through to RAG (chunks cannot
+        // express per-department budget vs spend).
+        new(
+            ChatReportingTask.BudgetUtilization,
+            ChatExecutionMode.Reporting,
+            ChatIntentFamily.Aggregate,
+            "deterministic-budget-utilization",
+            RequiredAny:
+            [
+                "ngan sach", "budget", "han muc", "vuot ngan sach", "vuot han muc",
+                "over budget", "overbudget", "muc su dung", "utilization", "con lai bao nhieu",
+                "budget remaining", "remaining budget", "ngan sach con lai"
+            ]),
         new(
             ChatReportingTask.Comparison,
             ChatExecutionMode.Reporting,
@@ -57,6 +73,46 @@ internal sealed class DeterministicReportingTaskPlanner
                 ["vendor", "nha cung cap", "merchant"],
                 ["top", "nhieu nhat", "chi nhieu", "ranking", "xep hang", "dong gop"]
             ]),
+        // Department ranking: "phòng ban nào chiếm nhiều nhất", "phòng ban chi nhiều nhất".
+        // The tenant expense summary already exposes the top-spending department, so
+        // we route these to the Summary reporting task instead of falling through to RAG.
+        new(
+            ChatReportingTask.Summary,
+            ChatExecutionMode.Reporting,
+            ChatIntentFamily.Ranking,
+            "deterministic-department-ranking",
+            RequiredAllAnyGroups:
+            [
+                ["phong ban", "bo phan", "department", "team"],
+                ["nhieu nhat", "chi nhieu", "cao nhat", "top", "ranking", "xep hang", "chiem nhieu", "lon nhat", "dong gop nhieu"]
+            ]),
+        // Category ranking: "hạng mục nào chi cao nhất", "loại chi phí nào nhiều nhất".
+        // The summary already exposes the top spending category with its share %.
+        new(
+            ChatReportingTask.Summary,
+            ChatExecutionMode.Reporting,
+            ChatIntentFamily.Ranking,
+            "deterministic-category-ranking",
+            RequiredAllAnyGroups:
+            [
+                ["hang muc", "hangmuc", "loai chi", "loai chi phi", "danh muc", "category", "khoan muc"],
+                ["nhieu nhat", "chi nhieu", "cao nhat", "top", "ranking", "xep hang", "chiem nhieu", "lon nhat"]
+            ]),
+        // Strong standalone overview/report phrases. These unambiguously request a
+        // spend overview ("báo cáo tổng quan", "tổng quan chi tiêu tháng này") and
+        // must NOT require an extra spend keyword group, otherwise they fall through
+        // to RAG and the model wrongly sums only the few retrieved chunks.
+        new(
+            ChatReportingTask.Summary,
+            ChatExecutionMode.Reporting,
+            ChatIntentFamily.Aggregate,
+            "deterministic-overview-report",
+            RequiredAny:
+            [
+                "bao cao tong quan", "tong quan chi tieu", "tong quan tai chinh",
+                "tong quan thang", "bao cao chi tieu", "bao cao thang", "overview",
+                "tong ket chi tieu", "tong ket thang", "financial overview", "spending overview"
+            ]),
         new(
             ChatReportingTask.Summary,
             ChatExecutionMode.Reporting,
@@ -72,6 +128,18 @@ internal sealed class DeterministicReportingTaskPlanner
             [
                 ["chi", "spend", "spending", "expense", "tai chinh", "financial", "burn"],
                 ["tong", "total", "picture", "buc tranh", "tong quan", "bao nhieu", "rate"]
+            ]),
+        // Document count + amount aggregate questions: "tôi có bao nhiêu chứng từ và tổng tiền là bao nhiêu"
+        // Without these patterns the question falls through to RAG which cannot reliably aggregate.
+        new(
+            ChatReportingTask.Summary,
+            ChatExecutionMode.Reporting,
+            ChatIntentFamily.Aggregate,
+            "deterministic-document-count-or-amount",
+            RequiredAllAnyGroups:
+            [
+                ["bao nhieu", "how many", "total", "tong"],
+                ["chung tu", "hoa don", "khoan chi", "expense", "expenses", "document", "documents", "receipt", "receipts", "tien", "amount", "money", "spend"]
             ])
     ];
 

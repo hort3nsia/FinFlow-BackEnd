@@ -293,6 +293,7 @@ public static class DependencyInjection
         services.AddHostedService<IntentExemplarStartupJob>();
         services.AddScoped<Chat.DocumentChunkReembedJob>();
         services.AddScoped<Chat.IntentEvalHarness>();
+        services.AddScoped<Chat.RagEvalHarness>();
 
         services.AddScoped<IChatIntentPlanner>(sp => new ShadowModeIntentPlanner(
             legacy: sp.GetRequiredService<EnterpriseChatIntentPlanner>(),

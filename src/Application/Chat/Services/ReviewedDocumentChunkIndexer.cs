@@ -115,7 +115,7 @@ public sealed class ReviewedDocumentChunkIndexer : IReviewedDocumentChunkIndexer
         builder.AppendLine($"DepartmentId: {document.IdDepartment}");
         builder.AppendLine($"Subtotal: {document.Subtotal:0.##}");
         builder.AppendLine($"VAT: {document.Vat:0.##}");
-        builder.AppendLine($"Total: {document.TotalAmount:0.##}");
+        builder.AppendLine($"Total: {document.TotalAmount:0.##}{FormatAmountWithSeparators(document.TotalAmount)}");
         builder.AppendLine($"Status: {document.Status}");
         builder.AppendLine($"Submitted at UTC: {document.SubmittedAt:O}");
 
@@ -137,18 +137,19 @@ public sealed class ReviewedDocumentChunkIndexer : IReviewedDocumentChunkIndexer
         var vendorName = DocumentTextNormalizer.NormalizeVendorName(document.VendorName);
         var reference = DocumentTextNormalizer.NormalizeReference(document.Reference);
         var builder = new StringBuilder();
+        // Lead with the high-signal fields (merchant + amount). Boilerplate like the original
+        // file name / content type was previously the FIRST thing in the chunk, which made every
+        // receipt embed almost identically and tanked vendor/amount retrieval recall (measured
+        // 0% before this change). The dominant tokens of a chunk drive its embedding, so the
+        // merchant name and total must come first; file metadata is demoted to the end.
         builder.AppendLine("Receipt record");
-        builder.AppendLine($"Original file name: {NormalizeForEvidence(document.OriginalFileName)}");
-        builder.AppendLine($"Content type: {NormalizeForEvidence(document.ContentType)}");
         builder.AppendLine($"Merchant: {NormalizeForEvidence(vendorName)}");
         builder.AppendLine($"Merchant search key: {DocumentTextNormalizer.BuildSearchKey(vendorName)}");
+        builder.AppendLine($"Total: {document.TotalAmount:0.##}{FormatAmountWithSeparators(document.TotalAmount)}");
         builder.AppendLine($"Reference: {NormalizeReferenceForEvidence(document.Reference, reference)}");
         builder.AppendLine($"Reference search key: {DocumentTextNormalizer.BuildSearchKey(reference)}");
         builder.AppendLine($"Document date: {document.DocumentDate:yyyy-MM-dd}");
         builder.AppendLine($"Vendor tax id: {NormalizeForEvidence(document.VendorTaxId ?? "n/a")}");
-        builder.AppendLine($"Source: {NormalizeForEvidence(document.Source)}");
-        builder.AppendLine($"Reviewed by staff: {NormalizeForEvidence(document.ReviewedByStaff)}");
-        builder.AppendLine($"Confidence label: {NormalizeForEvidence(document.ConfidenceLabel)}");
 
         if (document.LineItems.Count > 0)
         {
@@ -159,6 +160,13 @@ public sealed class ReviewedDocumentChunkIndexer : IReviewedDocumentChunkIndexer
                     $"- {NormalizeForEvidence(DocumentTextNormalizer.NormalizeLineItemName(lineItem.ItemName))}: quantity {lineItem.Quantity:0.##}, unit price {lineItem.UnitPrice:0.##}, total {lineItem.Total:0.##}{FormatLineTaxSuffix(lineItem)}");
             }
         }
+
+        // Low-signal provenance metadata last, so it does not dominate the embedding.
+        builder.AppendLine($"Source: {NormalizeForEvidence(document.Source)}");
+        builder.AppendLine($"Reviewed by staff: {NormalizeForEvidence(document.ReviewedByStaff)}");
+        builder.AppendLine($"Confidence label: {NormalizeForEvidence(document.ConfidenceLabel)}");
+        builder.AppendLine($"Original file name: {NormalizeForEvidence(document.OriginalFileName)}");
+        builder.AppendLine($"Content type: {NormalizeForEvidence(document.ContentType)}");
 
         return builder.ToString().Trim();
     }
@@ -209,6 +217,20 @@ public sealed class ReviewedDocumentChunkIndexer : IReviewedDocumentChunkIndexer
 
     private static string FormatTaxRate(decimal? taxRate) =>
         taxRate.HasValue ? $"{taxRate.Value:0.##}%" : "n/a";
+
+    /// <summary>
+    /// Returns a " (3.393.500)" suffix with thousand separators when the amount is a whole
+    /// number, so a chunk carries BOTH the raw form ("3393500") and the human-written form
+    /// ("3.393.500") a user is likely to type. Amount-lookup retrieval was 0% because chunks
+    /// only stored the separator-less form. Empty for non-integer amounts.
+    /// </summary>
+    private static string FormatAmountWithSeparators(decimal amount)
+    {
+        if (amount <= 0m || amount != Math.Truncate(amount))
+            return string.Empty;
+        var grouped = ((long)amount).ToString("#,0", System.Globalization.CultureInfo.GetCultureInfo("vi-VN"));
+        return $" ({grouped})";
+    }
 
     private static void ValidateDocumentMetadata(ReviewedDocument document)
     {

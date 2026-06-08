@@ -1,6 +1,7 @@
 using FinFlow.Application.Budgets.Services;
 using FinFlow.Domain.Entities;
 using FinFlow.Domain.Enums;
+using FinFlow.Domain.Expenses;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Infrastructure.Budgets;
@@ -126,6 +127,16 @@ internal sealed class BudgetWorkspaceReadService : IBudgetWorkspaceReadService
                 document.SubmittedAt))
             .ToListAsync(cancellationToken);
 
+        var paidDocumentIds = (await _dbContext.Payments
+            .AsNoTracking()
+            .IgnoreQueryFilters()
+            .Where(payment => payment.IdTenant == tenantId)
+            .Where(payment => payment.Status == PaymentStatus.Confirmed)
+            .Select(payment => payment.DocumentId)
+            .Distinct()
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
+
         var documentLookup = documents
             .GroupBy(document => document.DepartmentId)
             .ToDictionary(group => group.Key, group => group.ToList());
@@ -140,6 +151,7 @@ internal sealed class BudgetWorkspaceReadService : IBudgetWorkspaceReadService
                 departments,
                 documentLookup.GetValueOrDefault(budget.DepartmentId) ?? [],
                 trendLookup.GetValueOrDefault(budget.DepartmentId) ?? [],
+                paidDocumentIds,
                 setByName))
             .ToList();
 
@@ -181,6 +193,7 @@ internal sealed class BudgetWorkspaceReadService : IBudgetWorkspaceReadService
         IReadOnlyList<DepartmentRow> departments,
         IReadOnlyList<DocumentRow> documents,
         IReadOnlyList<BudgetRow> trendRows,
+        IReadOnlySet<Guid> paidDocumentIds,
         string setByName)
     {
         var pool = budget.AllocatedAmount + budget.CarryOverAmount;
@@ -208,8 +221,8 @@ internal sealed class BudgetWorkspaceReadService : IBudgetWorkspaceReadService
             budget.IsActive,
             budget.UpdatedAt,
             documents.Count,
-            documents.Count(document => document.Status is ReviewedDocumentStatus.Approved or ReviewedDocumentStatus.PendingEscalation),
-            0,
+            documents.Count(document => (document.Status is ReviewedDocumentStatus.Approved or ReviewedDocumentStatus.PendingEscalation) && !paidDocumentIds.Contains(document.Id)),
+            documents.Count(document => paidDocumentIds.Contains(document.Id)),
             setByName,
             budget.CreatedAt,
             budget.BaseCurrencyCode,
