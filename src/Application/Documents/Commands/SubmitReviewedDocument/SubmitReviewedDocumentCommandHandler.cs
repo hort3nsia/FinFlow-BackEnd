@@ -1,6 +1,7 @@
 using FinFlow.Application.Common.ExchangeRates;
 using FinFlow.Application.Documents.Duplicates;
 using FinFlow.Application.Documents.DTOs.Responses;
+using FinFlow.Application.Documents.Ocr;
 using FinFlow.Application.Vendors.Services;
 using FinFlow.Domain.Abstractions;
 using FinFlow.Domain.Documents;
@@ -100,6 +101,16 @@ public sealed class SubmitReviewedDocumentCommandHandler
             // don't pollute the DB with vendors for documents that fail later
             // checks (currency, line items, etc). The resolver attaches the
             // resulting vendor Id via documentEntity.LinkVendor().
+        }
+
+        // U+FFFD means an upstream decode already destroyed the original bytes (lossy,
+        // unrecoverable). Reject rather than persist garbage — force the reviewer to retype.
+        if (DocumentTextNormalizer.ContainsUnrecoverableMojibake(request.VendorName)
+            || DocumentTextNormalizer.ContainsUnrecoverableMojibake(request.Reference)
+            || DocumentTextNormalizer.ContainsUnrecoverableMojibake(request.Category)
+            || request.LineItems.Any(item => DocumentTextNormalizer.ContainsUnrecoverableMojibake(item.ItemName)))
+        {
+            return Result.Failure<ReviewedDocumentResponse>(ReviewedDocumentErrors.UnreadableCharacters);
         }
 
         var lineItems = request.LineItems
@@ -270,9 +281,13 @@ public sealed class SubmitReviewedDocumentCommandHandler
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(
+            // DB commit already succeeded; the document exists but has no vector
+            // chunks, so it is invisible to RAG until re-indexed. Logged at Error
+            // (not Warning) so this silent loss is alertable. Recovery path:
+            // ReindexReviewedDocumentsCommand (admin-triggered).
+            _logger.LogError(
                 ex,
-                "Reviewed document auto-index failed after submit for tenant {TenantId} document {DocumentId}",
+                "Reviewed document auto-index failed after submit for tenant {TenantId} document {DocumentId}; document is committed but absent from RAG until manual reindex.",
                 documentEntity.IdTenant,
                 documentEntity.Id);
         }

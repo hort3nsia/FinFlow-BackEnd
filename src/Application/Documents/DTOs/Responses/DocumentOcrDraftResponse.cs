@@ -23,5 +23,6 @@ public sealed record DocumentOcrDraftResponse(
     decimal ExchangeRate = 1m,
     string BaseCurrencyCode = "VND",
     decimal TotalAmountInBaseCurrency = 0m,
-    int? ProcessedPageCount = null
+    int? ProcessedPageCount = null,
+    IReadOnlyList<string>? Warnings = null
 );

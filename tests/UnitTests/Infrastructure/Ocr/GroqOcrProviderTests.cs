@@ -45,7 +45,7 @@ public sealed class GroqOcrProviderTests
         Assert.Equal("Acme Cloud Ltd.", result.Value.VendorName);
         Assert.Equal("INV-2026-0042", result.Value.Reference);
         Assert.Equal("groq", result.Value.Source);
-        Assert.Equal("AI extracted", result.Value.ConfidenceLabel);
+        Assert.Equal("AI vision (unverified)", result.Value.ConfidenceLabel);
         Assert.Equal(2, result.Value.LineItems.Count);
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);

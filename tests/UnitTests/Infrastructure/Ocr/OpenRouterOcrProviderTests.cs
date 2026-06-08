@@ -46,7 +46,7 @@ public sealed class OpenRouterOcrProviderTests
         Assert.Equal("OpenRouter Vendor", result.Value.VendorName);
         Assert.Equal("INV-2026-1188", result.Value.Reference);
         Assert.Equal("openrouter", result.Value.Source);
-        Assert.Equal("AI extracted", result.Value.ConfidenceLabel);
+        Assert.Equal("AI vision (unverified)", result.Value.ConfidenceLabel);
         Assert.Equal(2, result.Value.LineItems.Count);
         Assert.NotNull(handler.LastRequest);
         Assert.EndsWith("chat/completions", handler.LastRequest!.RequestUri!.ToString(), StringComparison.Ordinal);
@@ -137,6 +137,56 @@ public sealed class OpenRouterOcrProviderTests
         Assert.DoesNotContain(logger.Invocations, invocation =>
             invocation.Arguments.Count >= 3 &&
             invocation.Arguments[2]?.ToString()?.Contains("I could not extract structured invoice fields.", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReturnsInvalidJson_WhenResponseBodyHasInvalidUtf8Bytes()
+    {
+        // A truncated/invalid UTF-8 multibyte sequence must fail loudly instead of
+        // silently decoding into U+FFFD and persisting mojibake downstream.
+        var invalidUtf8 = new byte[] { 0x7B, 0x22, 0x78, 0x22, 0x3A, 0x22, 0xC3, 0x28, 0x22, 0x7D }; // {"x":"<bad>"}
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(invalidUtf8)
+            {
+                Headers = { { "Content-Type", "application/json" } }
+            }
+        });
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://openrouter.test/api/v1/") };
+        var provider = new OpenRouterOcrProvider(
+            client,
+            new StubPdfPageRenderer(Result.Success<PdfRenderResult>(new PdfRenderResult([], 0, false))),
+            Options.Create(new OpenRouterProviderOptions()));
+
+        var result = await provider.ExtractAsync("receipt.jpg", "image/jpeg", [1, 2, 3], CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(DocumentOcrErrors.OcrInvalidJson, result.Error);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_PreservesVietnameseDiacritics_ForValidUtf8Body()
+    {
+        var json =
+            "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"vendorName\\\":\\\"BÁCH HÓA XANH\\\",\\\"reference\\\":\\\"INV-1\\\",\\\"documentDate\\\":\\\"2026-04-20\\\",\\\"totalAmount\\\":100.00,\\\"lineItems\\\":[]}\\n```\"}}]}";
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(Encoding.UTF8.GetBytes(json))
+            {
+                Headers = { { "Content-Type", "application/json" } }
+            }
+        });
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://openrouter.test/api/v1/") };
+        var provider = new OpenRouterOcrProvider(
+            client,
+            new StubPdfPageRenderer(Result.Success<PdfRenderResult>(new PdfRenderResult([], 0, false))),
+            Options.Create(new OpenRouterProviderOptions()));
+
+        var result = await provider.ExtractAsync("receipt.jpg", "image/jpeg", [1, 2, 3], CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        // Diacritics survive the byte->string decode (vendor name is title-cased by the normalizer).
+        Assert.Equal("Bách Hóa Xanh", result.Value.VendorName);
     }
 
     private sealed class StubPdfPageRenderer : IPdfPageRenderer

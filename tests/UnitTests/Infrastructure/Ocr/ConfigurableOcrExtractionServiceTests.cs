@@ -58,6 +58,88 @@ public sealed class ConfigurableOcrExtractionServiceTests
         Assert.True(provider.WasCalled);
     }
 
+    [Fact]
+    public async Task ExtractAsync_FallsThroughWhenActiveProviderReturnsDegradedResult()
+    {
+        // C2: a Success result with no total AND no vendor is "degraded". The orchestrator
+        // must try the next provider instead of accepting it blindly.
+        var degraded = new StubOcrProvider("Paddle", Result.Success(CreateDegradedResult("paddle-source")));
+        var good = new StubOcrProvider("Groq", Result.Success(CreateOcrResult("groq-source")));
+        var service = new ConfigurableOcrExtractionService(
+            [degraded, good],
+            Options.Create(new OcrOptions
+            {
+                ActiveProvider = "Paddle",
+                ProviderFallbackChain = ["Groq"]
+            }));
+
+        var result = await service.ExtractAsync("invoice.pdf", "application/pdf", [1, 2, 3], CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal("groq-source", result.Value.Source);
+        Assert.True(degraded.WasCalled);
+        Assert.True(good.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReturnsBestDegradedResult_WhenNoProviderIsClean()
+    {
+        // C2: every provider degraded -> still return the first degraded candidate so the
+        // user gets partial data to review, rather than a hard failure.
+        var degraded1 = new StubOcrProvider("Paddle", Result.Success(CreateDegradedResult("paddle-source")));
+        var degraded2 = new StubOcrProvider("Groq", Result.Success(CreateDegradedResult("groq-source")));
+        var service = new ConfigurableOcrExtractionService(
+            [degraded1, degraded2],
+            Options.Create(new OcrOptions
+            {
+                ActiveProvider = "Paddle",
+                ProviderFallbackChain = ["Groq"]
+            }));
+
+        var result = await service.ExtractAsync("invoice.pdf", "application/pdf", [1, 2, 3], CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Error.Description);
+        Assert.Equal("paddle-source", result.Value.Source); // first degraded candidate wins
+        Assert.True(degraded1.WasCalled);
+        Assert.True(degraded2.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_PrefersCleanFallback_OverEarlierDegraded()
+    {
+        // Degraded active provider, clean fallback -> clean result, vendor preserved.
+        var degraded = new StubOcrProvider("Paddle", Result.Success(CreateDegradedResult("paddle-source")));
+        var clean = new StubOcrProvider("OpenRouter", Result.Success(CreateOcrResult("openrouter-source")));
+        var service = new ConfigurableOcrExtractionService(
+            [degraded, clean],
+            Options.Create(new OcrOptions
+            {
+                ActiveProvider = "Paddle",
+                ProviderFallbackChain = ["OpenRouter"]
+            }));
+
+        var result = await service.ExtractAsync("invoice.pdf", "application/pdf", [1, 2, 3], CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("openrouter-source", result.Value.Source);
+        Assert.Equal("Acme Cloud Ltd.", result.Value.VendorName);
+    }
+
+    private static OcrExtractionResult CreateDegradedResult(string source) =>
+        new(
+            string.Empty,          // no vendor
+            string.Empty,
+            new DateOnly(2026, 4, 18),
+            null,
+            "Uncategorized",
+            null,
+            0m,
+            0m,
+            0m,                    // no total
+            source,
+            "OCR + LLM (verified)",
+            [], 1);
+
     private static OcrExtractionResult CreateOcrResult(string source) =>
         new(
             "Acme Cloud Ltd.",
