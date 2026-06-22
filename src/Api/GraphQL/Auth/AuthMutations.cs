@@ -7,6 +7,7 @@ using FinFlow.Application.Auth.Commands.RefreshToken;
 using FinFlow.Application.Auth.Commands.Register;
 using FinFlow.Application.Auth.Commands.ResetPasswordByOtp;
 using FinFlow.Application.Auth.Commands.ResetPasswordByToken;
+using FinFlow.Application.Auth.Commands.CheckPasswordResetOtp;
 using FinFlow.Application.Auth.Commands.ResendEmailVerification;
 using FinFlow.Application.Auth.Commands.SelectWorkspace;
 using FinFlow.Application.Auth.Commands.VerifyEmailByOtp;
@@ -57,6 +58,7 @@ public record SwitchWorkspaceInput(Guid MembershipId, string CurrentRefreshToken
 public record InviteMemberInput(string Email, RoleType Role, Guid DepartmentId);
 public record AcceptInviteInput(string InviteToken, string Password);
 public record ChangePasswordInput(string CurrentPassword, string NewPassword);
+public record CheckPasswordResetOtpInput(string Email, string Otp);
 public record ResetPasswordByOtpInput(string Email, string Otp, string NewPassword);
 
 public record AccountSessionPayload(
@@ -321,6 +323,20 @@ public class AuthMutations
             throw ToGraphQlException(result.Error);
 
         return result.Value;
+    }
+
+    public async Task<bool> CheckPasswordResetOtpAsync(
+        CheckPasswordResetOtpInput input,
+        [Service] IMediator mediator,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new CheckPasswordResetOtpCommand(new CheckPasswordResetOtpRequest(input.Email, input.Otp)),
+            cancellationToken);
+        if (result.IsFailure)
+            throw ToGraphQlException(result.Error);
+
+        return true;
     }
 
     public async Task<bool> VerifyEmailByTokenAsync(
