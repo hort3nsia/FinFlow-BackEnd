@@ -9,7 +9,7 @@ COPY src/Domain/FinFlow.Domain.csproj src/Domain/
 COPY src/Infrastructure/FinFlow.Infrastructure.csproj src/Infrastructure/
 
 # Restore dependencies (cached layer)
-RUN dotnet restore
+RUN dotnet restore src/Api/FinFlow.Api.csproj
 
 # Copy everything and build
 COPY . .
