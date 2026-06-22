@@ -150,14 +150,22 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngular", policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:4200",
-                "http://localhost:4201",
-                "http://localhost:4202",
-                "http://localhost:3000",
-                "http://localhost:3001",
-                "http://localhost:8080"
-            )
+        var origins = new List<string>
+        {
+            "http://localhost:4200",
+            "http://localhost:4201",
+            "http://localhost:4202",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:8080"
+        };
+
+        // Production: allow Vercel domain from environment variable
+        var vercelUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
+        if (!string.IsNullOrWhiteSpace(vercelUrl))
+            origins.Add(vercelUrl.TrimEnd('/'));
+
+        policy.WithOrigins(origins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
