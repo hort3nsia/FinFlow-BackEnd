@@ -399,6 +399,32 @@ app.UseWebSockets();
 app.MapGraphQL("/graphql");
 app.MapTenantBrandingAssetEndpoints();
 
+app.MapGet("/api/maintenance/reindex-chunks/{tenantId:guid}", async (Guid tenantId, IServiceProvider sp) => 
+{
+    await using var scope = sp.CreateAsyncScope();
+    var tenantWriter = scope.ServiceProvider.GetService<FinFlow.Domain.Interfaces.ICurrentTenantWriter>();
+    tenantWriter?.SetFromRequest(tenantId, null, isSuperAdmin: true);
+    var repo = scope.ServiceProvider.GetRequiredService<FinFlow.Domain.Documents.IReviewedDocumentRepository>();
+    var indexer = scope.ServiceProvider.GetRequiredService<FinFlow.Application.Chat.Interfaces.IReviewedDocumentChunkIndexer>();
+    
+    var docs = await repo.GetAllActiveByTenantAsync(tenantId, CancellationToken.None);
+    var total = 0; var failed = 0;
+    
+    foreach (var d in docs)
+    {
+        try { total += await indexer.ReindexAsync(d, CancellationToken.None); }
+        catch (Exception ex) { failed++; Console.WriteLine($"  reindex failed {d.Id}: {ex.Message}"); }
+    }
+    
+    return Results.Ok(new { 
+        message = "HOÀN TẤT REINDEX", 
+        tenantId = tenantId, 
+        totalDocuments = docs.Count, 
+        totalChunksCreated = total, 
+        failedDocuments = failed 
+    });
+});
+
 app.Run();
 
 public class Query
